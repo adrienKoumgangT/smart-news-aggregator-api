@@ -1,0 +1,5 @@
+/src/helpers/externapi/data/
+/src/helpers/externapi/extern_data/
+/src/lib/authentication/private_key.pem
+/src/lib/authentication/public_key.pem
+/test/
