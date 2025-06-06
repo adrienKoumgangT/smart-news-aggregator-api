@@ -23,6 +23,12 @@ class MongoDBManager:
     def __del__(self):
         self.close_connection()
 
+    def list_databases(self):
+        return self.client.list_database_names()
+
+    def list_collections(self, db_name: str):
+        return self.client[db_name].list_collection_names()
+
 
 class MongoDBManagerInstance:
     instance: Optional[MongoDBManager] = None
@@ -41,17 +47,3 @@ class MongoDBManagerInstance:
         return MongoDBManagerInstance.instance
 
 
-if __name__ == '__main__':
-    mongodb_instance = MongoDBManagerInstance.get_instance()
-
-    print("Databases:")
-    for db_info in mongodb_instance.client.list_database_names():
-        print(db_info)
-
-    print()
-
-    print("Collections from blog database:")
-    db = mongodb_instance.client["blog"]
-    collections = db.list_collection_names()
-    for collection in collections:
-        print(collection)

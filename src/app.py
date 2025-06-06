@@ -1,6 +1,8 @@
-from flask import Flask, Blueprint, render_template_string
+from flask import Flask, Blueprint, render_template_string, request, Response
+from flask_cors import CORS
 from flask_restx import Api
 
+from src.apps.article_endpoint import ns_article
 from src.apps.auth_endpoint import ns_auth
 from src.apps.test_endpoint import ns_test
 from src.apps.user_endpoint import ns_user
@@ -9,6 +11,20 @@ from src.lib.exception.exception_handler import register_error_handlers
 
 def create_app():
     app = Flask(__name__)
+
+    CORS(
+        app
+    )
+
+    # @app.before_request
+    # def basic_authentication():
+        # if request.method.lower() == 'options':
+            # return Response()
+
+    @app.after_request
+    def per_request_callbacks(response):
+        response.headers['Access-Control-Allow-Origin'] = '*'
+        return response
 
 
     @app.route("/")
@@ -65,6 +81,8 @@ def create_app():
 
     api.add_namespace(ns_auth, path='/auth')
     api.add_namespace(ns_user, path='/user')
+    api.add_namespace(ns_article, path='/article')
+
     api.add_namespace(ns_test, path='/test')
 
     register_error_handlers(api)
@@ -75,7 +93,6 @@ def create_app():
 
 
 if __name__ == "__main__":
-    app = create_app()
+    application = create_app()
 
-
-    app.run(host='0.0.0.0', port=5000, debug=True)
+    application.run(host='0.0.0.0', port=5000, debug=True)

@@ -69,17 +69,14 @@ class Address(BaseModel):
     country: str
 
     @staticmethod
-    def to_model(name_space=None):
-        d = {
+    def to_model(name_space: Namespace):
+        return name_space.model('AddressModel', {
             'street': fields.String(required=True),
             'city': fields.String(required=True),
             'state': fields.String(required=True),
             'zip': fields.String(required=True),
             'country': fields.String(required=True),
-        }
-        if name_space:
-            return name_space.model('AddressModel', d)
-        return d
+        })
 
 
 class User(MongoDBBaseModel):
