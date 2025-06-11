@@ -1,7 +1,7 @@
 from flask import request
 from flask_restx import Api
 
-from src.lib.exception.exception_server import UnsafeException
+from src.lib.exception.exception_server import UnsafeException, UnauthorizedException
 from src.models.server.server_model import ServerErrorLogModel
 
 
@@ -16,4 +16,14 @@ def register_error_handlers(api: Api):
         )
         server_error_log.save()
         return {"error": "unsafe error"}, 400
+
+    @api.errorhandler(UnauthorizedException)
+    def handle_unauthorized_exception(error: UnauthorizedException):
+        server_error_log = ServerErrorLogModel.from_request(
+            request=request,
+            exception_name='UnauthorizedException',
+            exception_message=error.message
+        )
+        server_error_log.save()
+        return {"error": "unauthorized error"}, 403
 

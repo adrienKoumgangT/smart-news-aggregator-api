@@ -10,11 +10,20 @@ from src.lib.database.nosql.document.mongodb.base import MongoDBBaseModel
 from src.lib.database.nosql.document.mongodb.mongodb_manager import MongoDBManagerInstance
 from src.lib.database.nosql.document.mongodb.objectid import PydanticObjectId
 from src.lib.log.api_logger import ApiLogger
+from src.models import DataManagerBase
 from src.models.article.comment_model import CommentModel
 
-class ArticleManager:
+
+class ArticleManager(DataManagerBase):
     database_name = configuration.get_configuration("mongodb.database")
     collection_name = configuration.get_configuration("mongodb.collection.articles")
+
+    @staticmethod
+    def collection():
+        return MongoDBManagerInstance.get_instance().get_collection(
+            db_name=ArticleManager.database_name,
+            collection_name=ArticleManager.collection_name
+        )
 
 
 class ArticleSourceModel(BaseModel):
@@ -51,7 +60,7 @@ class ArticleSummaryModel(MongoDBBaseModel):
     @staticmethod
     def to_model(name_space: Namespace):
         return name_space.model('ArticleSummaryModel', {
-            'article_id': fields.String(required=True),
+            'article_id': fields.String(required=False),
             'extern_id': fields.String(required=False),
             'extern_api': fields.String(required=True),
             'title': fields.String(required=True),
@@ -73,12 +82,7 @@ class ArticleSummaryModel(MongoDBBaseModel):
     def last_articles(cls, page: int = 1, limit: int = 10):
         api_logger = ApiLogger(f"[MONGODB] [ARTICLE SUMMARY] [GET] : page={page} and limit={limit}")
 
-        articles_collection = MongoDBManagerInstance.get_instance().get_collection(
-            db_name=ArticleManager.database_name,
-            collection_name=ArticleManager.collection_name
-        )
-
-        results = (articles_collection.find(
+        results = (ArticleManager.collection().find(
             {},
             {
                 '_id': 1,
@@ -131,12 +135,7 @@ class ArticleModel(ArticleSummaryModel):
     def save(self):
         api_logger = ApiLogger(f"[MONGODB] [ARTICLE] [SAVE] : {self.to_json()}")
 
-        articles_collection = MongoDBManagerInstance.get_instance().get_collection(
-            db_name=ArticleManager.database_name,
-            collection_name=ArticleManager.collection_name
-        )
-
-        article = articles_collection.find_one(
+        article = ArticleManager.collection().find_one(
             {
                 'extern_api': self.extern_api,
                 'extern_id': self.extern_id,
@@ -148,7 +147,7 @@ class ArticleModel(ArticleSummaryModel):
             return None
 
         try:
-            result = articles_collection.insert_one(self.to_bson())
+            result = ArticleManager.collection().insert_one(self.to_bson())
         except DuplicateKeyError:
             api_logger.print_error("Article already exists")
             return None
@@ -160,12 +159,8 @@ class ArticleModel(ArticleSummaryModel):
     @classmethod
     def get(cls, article_id: str):
         api_logger = ApiLogger(f"[MONGODB] [ARTICLE] [GET] : {article_id}")
-        articles_collection = MongoDBManagerInstance.get_instance().get_collection(
-            db_name=ArticleManager.database_name,
-            collection_name=ArticleManager.collection_name
-        )
 
-        article = articles_collection.find_one({'_id': ObjectId(article_id)})
+        article = ArticleManager.collection().find_one({'_id': ObjectId(article_id)})
         if article is None:
             api_logger.print_error("Article does not exist")
             return None

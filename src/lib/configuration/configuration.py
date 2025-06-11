@@ -9,10 +9,13 @@ env_var = {
     "mongodb.database": "smart-news-aggregator",
     "mongodb.collection.users": "users",
     "mongodb.collection.articles": "articles",
+    "mongodb.collection.user_article_interactions": "user-article-interactions",
     "mongodb.collection.comments": "comments",
     "mongodb.collection.log_requests": "log-requests",
     "mongodb.collection.server_error_log": "server-error-log",
     "mongodb.collection.auth_event_log": "auth-event-log",
+
+    "redis.uri": "redis://localhost:6379",
 
     "externapi.mediastack.enable": True,
     "externapi.mediastack.access_key": "",

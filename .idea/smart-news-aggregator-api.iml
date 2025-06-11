@@ -6,6 +6,8 @@
   <component name="NewModuleRootManager">
     <content url="file://$MODULE_DIR$">
       <excludeFolder url="file://$MODULE_DIR$/.venv" />
+      <excludeFolder url="file://$MODULE_DIR$/src/helpers/externapi/data" />
+      <excludeFolder url="file://$MODULE_DIR$/src/helpers/externapi/extern_data" />
     </content>
     <orderEntry type="jdk" jdkName="Python 3.13 (smart-news-aggregator-api)" jdkType="Python SDK" />
     <orderEntry type="sourceFolder" forTests="false" />

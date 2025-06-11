@@ -1,3 +1,4 @@
+from flask import jsonify, request
 from flask_restx import Namespace, Resource
 
 from src.lib.exception.exception_server import UnsafeException
@@ -13,3 +14,16 @@ class TestErrorResource(Resource):
 
     def post(self):
         raise UnsafeException("Test Error: POST")
+
+
+@ns_test.route('/data')
+class TestDataResource(Resource):
+
+    def get(self):
+        return jsonify({"message": "Get Service"})
+
+    def post(self):
+        data = request.get_json()
+
+        return jsonify({"data": data})
+

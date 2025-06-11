@@ -10,7 +10,7 @@ class MongoDBBaseModel(BaseModel):
     updated_at: Optional[datetime] = datetime.now(timezone.utc)
 
     def to_json(self) -> dict:
-        return self.model_dump(by_alias=False, exclude_none=True)
+        return self.model_dump(by_alias=False, exclude_none=True, exclude={"created_at", "updated_at"})
 
     def to_bson(self) -> dict:
         data = self.model_dump(by_alias=True, exclude_none=True)

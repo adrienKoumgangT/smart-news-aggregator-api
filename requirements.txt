@@ -9,3 +9,4 @@ cryptography~=45.0.3
 pydantic_core~=2.34.1
 email_validator~=2.2.0
 flask-cors~=6.0.0
+redis[hiredis]~=6.2.0
