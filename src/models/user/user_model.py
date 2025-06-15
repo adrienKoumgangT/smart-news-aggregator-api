@@ -1,4 +1,5 @@
-from __future__ import annotations
+# from __future__ import annotations
+import json
 from datetime import datetime, timezone
 from typing import Optional
 
@@ -10,10 +11,11 @@ from pymongo.errors import DuplicateKeyError
 from src.lib.authentication.password import hash_password
 from src.lib.configuration import configuration
 from src.lib.database.nosql.document.mongodb.base import MongoDBBaseModel
-from src.lib.database.nosql.document.mongodb.mongodb_manager import MongoDBManagerInstance
+from src.lib.database.nosql.document.mongodb.mongodb_manager import mongodb_client
 from src.lib.database.nosql.document.mongodb.objectid import PydanticObjectId
 from src.lib.database.nosql.keyvalue.redis.redis_manager import RedisManagerInstance
 from src.lib.log.api_logger import ApiLogger
+from src.lib.utility.utils import MyJSONEncoder, my_json_decoder
 from src.models import DataBaseModel, DataManagerBase
 
 account_status = {
@@ -39,26 +41,21 @@ class UserManager(DataManagerBase):
 
     @staticmethod
     def collection():
+        """
         return MongoDBManagerInstance.get_instance().get_collection(
             db_name=UserManager.database_name,
             collection_name=UserManager.collection_name
         )
+        """
+        return mongodb_client[UserManager.database_name][UserManager.collection_name]
 
     @staticmethod
     def init_database():
         UserManager.collection().create_index([("email", 1)], unique=True)
 
     @staticmethod
-    def generate_user_me_key(user_id: str):
+    def generate_user_key(user_id: str):
         return f"user:{user_id}:me"
-
-    @staticmethod
-    def generate_user_account_key(user_id: str):
-        return f"user:{user_id}:account"
-
-    @staticmethod
-    def generate_user_preferences_key(user_id: str):
-        return f"user:{user_id}:preferences"
 
 
 class PasswordHistory(BaseModel):
@@ -96,27 +93,97 @@ class Address(BaseModel):
         })
 
 
-class User(MongoDBBaseModel):
+class UserAuthor(MongoDBBaseModel):
     user_id: Optional[PydanticObjectId] = Field(None, alias="_id")
 
     firstname: str
     lastname: str
-    email: str
-    password: str
-    account: Account
-    address: Optional[Address] = None
-    password_history: list[PasswordHistory] = []
-
-    preferences: list[str] = []
 
     @field_serializer("user_id")
     def serialize_id(self, id_value: PydanticObjectId, _info):
         return str(id_value) if id_value else None
 
-    def update(self, user_me: UserMe):
-        self.firstname = user_me.firstname
-        self.lastname = user_me.lastname
-        self.address = user_me.address
+    @staticmethod
+    def to_model(name_space: Namespace):
+        return name_space.model('UserAuthorModel', {
+            'user_id': fields.String(required=True),
+            'firstname': fields.String(required=True),
+            'lastname': fields.String(required=True),
+        })
+
+
+class UserMe(UserAuthor):
+    email: str
+    account: Account
+    address: Optional[Address] = None
+
+    @staticmethod
+    def to_model(name_space: Namespace):
+        return name_space.model('UserMeModel', {
+            'user_id': fields.String(required=True),
+            'firstname': fields.String(required=True),
+            'lastname': fields.String(required=True),
+            'email': fields.String(required=True),
+            'account': fields.Nested(Account.to_model(name_space)),
+            'address': fields.Nested(Address.to_model(name_space)),
+        })
+
+
+class User(UserMe):
+    password: str
+    password_history: list[PasswordHistory] = []
+
+    preferences: list[str] = []
+
+
+    def to_author_json(self):
+        return self.model_dump(
+            by_alias=False,
+            exclude_none=True,
+            include=UserAuthor.model_fields.keys(),
+            exclude={"created_at", "updated_at"},
+        )
+
+    def to_me_json(self):
+        return self.model_dump(
+            by_alias=False,
+            exclude_none=True,
+            include=UserMe.model_fields.keys(),
+            exclude={"created_at", "updated_at"},
+        )
+
+    def to_preferences_json(self):
+        return {
+            "preferences": self.preferences
+        }
+
+
+    @classmethod
+    def get(cls, user_id: str):
+        user_key = UserManager.generate_user_key(user_id=user_id)
+
+        api_logger = ApiLogger(f"[REDIS] [USER] [GET] : {user_id}")
+        user_caching = RedisManagerInstance.get_instance().get(key=user_key)
+        if user_caching:
+            api_logger.print_log()
+            user_json = json.loads(user_caching, object_hook=my_json_decoder)
+            return cls(**user_json)
+        api_logger.print_error(message_error="Cache missing")
+
+        api_logger = ApiLogger(f"[MONGODB] [USER] [GET] : {user_id}")
+        result = UserManager.collection().find_one({"_id": ObjectId(user_id)})
+        if result is None:
+            api_logger.print_error("User does not exist")
+            return None
+        api_logger.print_log()
+
+        user = cls(**result)
+
+        # print(user.to_json())
+        user_json = json.dumps(user, cls=MyJSONEncoder)
+        RedisManagerInstance.get_instance().set(key=user_key, value=user_json)
+
+        return user
 
     def save(self):
         api_logger = ApiLogger(f"[MONGODB] [USER] [SAVE] : {self.to_json()}")
@@ -235,16 +302,6 @@ class User(MongoDBBaseModel):
         return result.deleted_count > 0
 
     @classmethod
-    def get(cls, user_id: str):
-        api_logger = ApiLogger(f"[MONGODB] [USER] [GET] : {user_id}")
-        user = UserManager.collection().find_one({"_id": ObjectId(user_id)})
-        if user is None:
-            api_logger.print_error("User does not exist")
-            return None
-        api_logger.print_log()
-        return cls(**user)
-
-    @classmethod
     def get_by_email(cls, email: str):
         api_logger = ApiLogger(f"[MONGODB] [USER] [GET] [BY EMAIL] : {email}")
         user = UserManager.collection().find_one({"email": email})
@@ -253,68 +310,6 @@ class User(MongoDBBaseModel):
             return None
         api_logger.print_log()
         return cls(**user)
-
-    @staticmethod
-    def get_account(user_id: str):
-        user_account_key = UserManager.generate_user_account_key(user_id=user_id)
-
-        api_logger = ApiLogger(f"[REGIS] [USER] [GET ACCOUNT] : {user_id}")
-        account_caching = RedisManagerInstance.get_instance().get_dict(key=user_account_key)
-        if account_caching:
-            api_logger.print_log()
-            return Account(**account_caching)
-        api_logger.print_error(message_error="Cache missing")
-
-        user = User.get(user_id=user_id)
-        RedisManagerInstance.get_instance().set_dict(key=user_account_key, value=user.account.model_dump())
-        return user.account
-
-
-class UserMe(DataBaseModel):
-    user_id: str
-    firstname: str
-    lastname: str
-    email: str
-    account: Account
-    address: Optional[Address] = None
-
-    @classmethod
-    def from_user(cls, user: User):
-        return cls(
-            user_id=str(user.user_id),
-            firstname=user.firstname,
-            lastname=user.lastname,
-            email=user.email,
-            account=user.account,
-            address=user.address
-        )
-
-    @classmethod
-    def get(cls, user_id: str):
-        user_me_key = UserManager.generate_user_me_key(user_id=user_id)
-
-        api_logger = ApiLogger(f"[REDIS] [USER] [GET ME] : {user_id}")
-        user_me_caching = RedisManagerInstance.get_instance().get_dict(key=user_me_key)
-        if user_me_caching:
-            api_logger.print_log()
-            return cls(**user_me_caching)
-        api_logger.print_error(message_error="Cache missing")
-
-        user = User.get(user_id=user_id)
-        user_me = cls.from_user(user)
-        RedisManagerInstance.get_instance().set_dict(key=user_me_key, value=user_me.to_json())
-        return user_me
-
-    @staticmethod
-    def to_model(name_space: Namespace):
-        return name_space.model('UserMeModel', {
-            'user_id': fields.String(required=True),
-            'firstname': fields.String(required=True),
-            'lastname': fields.String(required=True),
-            'email': fields.String(required=True),
-            'account': fields.Nested(Account.to_model(name_space)),
-            'address': fields.Nested(Address.to_model(name_space)),
-        })
 
 
 class UserMePreferences(DataBaseModel):
@@ -346,4 +341,5 @@ class UserMePreferences(DataBaseModel):
         return name_space.model('UserMePreferencesModel', {
             'preferences': fields.List(fields.String, description="List of preferences (tags, categories, ...)"),
         })
+
 

@@ -3,10 +3,12 @@ from flask_restx import Namespace, Resource
 
 from src.apps import token_required
 from src.lib.exception.exception_server import NotFoundException, UnauthorizedException
-from src.models.article.article_model import ArticleSummaryModel, ArticleModel
+from src.models.article.article_model import ArticleSummaryModel, ArticleModel, ArticleWithInteractionModel
 from src.models.article.comment_model import CommentModel
-from src.models.article.user_article_interaction_models import UserArticleInteractionModel, UserArticleInteraction
+from src.models.article.user_article_interaction_models import UserArticleInteractionModel, UserArticleInteraction, \
+    ArticleInteractionStatus
 from src.models.user.auth_model import UserToken
+from src.models.user.user_model import UserAuthor
 
 ns_article = Namespace('article', description='Article endpoint')
 
@@ -27,9 +29,37 @@ class LatestArticleResource(Resource):
 
         user_token: UserToken = g.user
 
-        articles = ArticleSummaryModel.last_articles(page=page, limit=limit)
+        articles = ArticleModel.last_articles(page=page, limit=limit)
 
-        return {"articles": [article.to_json() for article in articles]}
+        return {
+            "articles": [article.to_summary() for article in articles],
+            "total": len(articles)*10,
+            "page": page,
+            "pageCount": len(articles),
+        }
+
+
+@ns_article.route('/history')
+@ns_article.param('page', 'Page')
+@ns_article.param('limit', 'Number of articles to return')
+class ArticleHistoryResource(Resource):
+
+    @token_required
+    @ns_article.marshal_with(ArticleSummaryModel.to_model(name_space=ns_article))
+    def get(self):
+        page_arg = request.args.get('page', default=1, type=int)
+        limit_arg = request.args.get('limit', default=5, type=int)
+
+        page = page_arg if page_arg > 0 else 1
+        limit = limit_arg if limit_arg > 0 else 10
+
+        user_token: UserToken = g.user
+
+        histories = UserArticleInteractionModel.get_read_history(user_id=user_token.id, page=page, limit=limit)
+
+        result = [history.to_json() for history in histories]
+
+        return {"history": result}
 
 
 @ns_article.route('/<string:article_id>')
@@ -41,10 +71,18 @@ class ArticleSummaryResource(Resource):
     def get(self, article_id):
         user_token: UserToken = g.user
 
-        article = ArticleModel.get(article_id=article_id)
+        article = ArticleWithInteractionModel.get(article_id=article_id)
 
         if not article:
             raise NotFoundException("Article not found")
+
+        current_user_interaction = UserArticleInteractionModel.get_by_user_article(user_id=user_token.user_id, article_id=article_id)
+        if current_user_interaction:
+            article.current_user_interaction = ArticleInteractionStatus.from_interaction(interaction=current_user_interaction)
+
+        total_user_interaction = UserArticleInteractionModel.get_stats(article_id=article_id)
+        if total_user_interaction:
+            article.total_user_interaction = total_user_interaction
 
         UserArticleInteractionModel.update_interaction_read(
             user_id=user_token.user_id,
@@ -82,22 +120,7 @@ class ArticleSummaryResource(Resource):
 
         if not article:
             raise NotFoundException("Article not found")
-        return article.to_summary().to_json()
-
-@ns_article.route('/<string:article_id>/history')
-@ns_article.param('article_id', 'The article ID')
-class ArticleHistoryResource(Resource):
-
-    @token_required
-    @ns_article.marshal_with(ArticleSummaryModel.to_model(name_space=ns_article))
-    def get(self, article_id):
-        user_token: UserToken = g.user
-
-        histories = UserArticleInteractionModel.get_read_history(user_id=user_token.id)
-
-        result = [history.to_json() for history in histories]
-
-        return {"history": result}
+        return article.to_summary()
 
 
 @ns_article.route('/<string:article_id>/interaction')
@@ -138,7 +161,7 @@ class ArticleInteractionResource(Resource):
 class ArticleCommentResource(Resource):
 
     @token_required
-    @ns_article.marshal_with(CommentModel.to_model(name_space=ns_article))
+    @ns_article.marshal_with(CommentModel.to_model_list(name_space=ns_article))
     def get(self, article_id):
         page_arg = request.args.get('page', default=1, type=int)
         limit_arg = request.args.get('limit', default=10, type=int)
@@ -149,8 +172,12 @@ class ArticleCommentResource(Resource):
         user_token: UserToken = g.user
 
         comments = CommentModel.last_comments(article_id=article_id, page=page, limit=limit)
+        comments_result = []
+        for comment in comments:
+            user_author = UserAuthor.get(user_id=comment.user_id)
+            comments_result.append(comment.to_json() | {"author": (user_author.to_json() if user_author else None)})
 
-        return [comment.to_json() for comment in comments]
+        return {'comments': comments_result}
 
 
     @token_required
@@ -190,7 +217,17 @@ class ArticleCommentResource2(Resource):
             comment_id=comment_id
         )
 
-        return comment.to_json()
+        current_user_interaction = UserArticleInteractionModel.get_by_user_article(user_id=user_token.user_id, article_id=article_id, comment_id=comment_id)
+        if current_user_interaction:
+            comment.current_user_interaction = ArticleInteractionStatus.from_interaction(interaction=current_user_interaction)
+
+        total_user_interaction = UserArticleInteractionModel.get_stats(article_id=article_id, comment_id=comment_id)
+        if total_user_interaction:
+            comment.total_user_interaction = total_user_interaction
+
+        user_author = UserAuthor.get(user_id=comment.user_id)
+
+        return comment.to_json() | {"author": (user_author.to_json() if user_author else None)}
 
 
     @token_required
@@ -201,6 +238,9 @@ class ArticleCommentResource2(Resource):
 
         if comment is None:
             raise NotFoundException("Comment not found")
+
+        if comment.user_id != user_token.user_id:
+            raise UnauthorizedException("You are not authorized to perform this action")
 
         comment.delete()
 

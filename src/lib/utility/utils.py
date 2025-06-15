@@ -12,6 +12,17 @@ class MyJSONEncoder(JSONEncoder):
         return o.__dict__
 
 
+def my_json_decoder(dct):
+    for key, value in dct.items():
+        # Try to parse datetime strings
+        if isinstance(value, str):
+            try:
+                dct[key] = datetime.datetime.fromisoformat(value)
+            except ValueError as e:
+                pass  # Leave as string if not ISO datetime
+    return dct
+
+
 class TimeUtils(object):
 
     @staticmethod

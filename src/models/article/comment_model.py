@@ -7,10 +7,11 @@ from pymongo.errors import DuplicateKeyError
 
 from src.lib.configuration import configuration
 from src.lib.database.nosql.document.mongodb.base import MongoDBBaseModel
-from src.lib.database.nosql.document.mongodb.mongodb_manager import MongoDBManagerInstance
+from src.lib.database.nosql.document.mongodb.mongodb_manager import mongodb_client
 from src.lib.database.nosql.document.mongodb.objectid import PydanticObjectId
 from src.lib.log.api_logger import ApiLogger
 from src.models import DataManagerBase
+from src.models.user.user_model import UserAuthor
 
 
 class CommentManager(DataManagerBase):
@@ -19,10 +20,13 @@ class CommentManager(DataManagerBase):
 
     @staticmethod
     def collection():
+        """
         return MongoDBManagerInstance.get_instance().get_collection(
             db_name=CommentManager.database_name,
             collection_name=CommentManager.collection_name
         )
+        """
+        return mongodb_client[CommentManager.database_name][CommentManager.collection_name]
 
 
 class CommentModel(MongoDBBaseModel):
@@ -45,6 +49,7 @@ class CommentModel(MongoDBBaseModel):
             'article_id': fields.String(required=False),
             'comment_fk': fields.String(required=False),
             'content': fields.String(required=True),
+            'author': fields.Nested(UserAuthor.to_model(name_space=name_space), required=False),
         })
 
     @staticmethod
@@ -131,6 +136,7 @@ class CommentModel(MongoDBBaseModel):
         api_logger.print_log()
 
         if results:
+            # print(results)
             return [cls(**result) for result in results]
         return []
 

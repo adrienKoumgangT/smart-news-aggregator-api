@@ -6,7 +6,7 @@ from pydantic import Field, field_serializer
 
 from src.lib.configuration import configuration
 from src.lib.database.nosql.document.mongodb.base import MongoDBBaseModel
-from src.lib.database.nosql.document.mongodb.mongodb_manager import MongoDBManagerInstance
+from src.lib.database.nosql.document.mongodb.mongodb_manager import mongodb_client
 from src.lib.database.nosql.document.mongodb.objectid import PydanticObjectId
 from src.lib.log.api_logger import ApiLogger
 from src.lib.utility.utils_server import RequestData
@@ -15,6 +15,16 @@ from src.lib.utility.utils_server import RequestData
 class ServerErrorLogManager:
     database_name = configuration.get_configuration("mongodb.database")
     collection_name = configuration.get_configuration("mongodb.collection.server_error_log")
+
+    @staticmethod
+    def collection():
+        """
+        return MongoDBManagerInstance.get_instance().get_collection(
+            db_name=ServerErrorLogManager.database_name,
+            collection_name=ServerErrorLogManager.collection_name
+        )
+        """
+        return mongodb_client[ServerErrorLogManager.database_name][ServerErrorLogManager.collection_name]
 
 
 class ServerErrorLogModel(MongoDBBaseModel):
@@ -35,10 +45,7 @@ class ServerErrorLogModel(MongoDBBaseModel):
     def save(self):
         api_logger = ApiLogger(f"[MONGODB] [SERVER ERROR LOG] [SAVE] : {self.to_json()}")
 
-        server_error_log_collection = MongoDBManagerInstance.get_instance().get_collection(
-            db_name=ServerErrorLogManager.database_name,
-            collection_name=ServerErrorLogManager.collection_name
-        )
+        server_error_log_collection = ServerErrorLogManager.collection()
 
         result = server_error_log_collection.insert_one(self.to_bson())
 

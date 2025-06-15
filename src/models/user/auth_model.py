@@ -6,7 +6,7 @@ from pydantic import Field, field_serializer
 
 from src.lib.configuration import configuration
 from src.lib.database.nosql.document.mongodb.base import MongoDBBaseModel
-from src.lib.database.nosql.document.mongodb.mongodb_manager import MongoDBManagerInstance
+from src.lib.database.nosql.document.mongodb.mongodb_manager import mongodb_client
 from src.lib.database.nosql.document.mongodb.objectid import PydanticObjectId
 from src.lib.log.api_logger import ApiLogger
 from src.lib.utility.utils_server import RequestData
@@ -93,6 +93,16 @@ class AuthEventLogManager:
     database_name = configuration.get_configuration("mongodb.database")
     collection_name = configuration.get_configuration("mongodb.collection.auth_event_log")
 
+    @staticmethod
+    def collection():
+        """
+        return MongoDBManagerInstance.get_instance().get_collection(
+            db_name=AuthEventLogManager.database_name,
+            collection_name=AuthEventLogManager.collection_name
+        )
+        """
+        return mongodb_client[AuthEventLogManager.database_name][AuthEventLogManager.collection_name]
+
 
 class AuthEventLogModel(MongoDBBaseModel):
     auth_event_log_id: Optional[PydanticObjectId] = Field(None, alias="_id")
@@ -110,10 +120,7 @@ class AuthEventLogModel(MongoDBBaseModel):
     def save(self):
         api_logger = ApiLogger(f"[MONGODB] [AUTH EVENT LOG] [SAVE]: {self.to_json()}")
 
-        server_error_log_collection = MongoDBManagerInstance.get_instance().get_collection(
-            db_name=AuthEventLogManager.database_name,
-            collection_name=AuthEventLogManager.collection_name
-        )
+        server_error_log_collection = AuthEventLogManager.collection()
 
         result = server_error_log_collection.insert_one(self.to_bson())
 

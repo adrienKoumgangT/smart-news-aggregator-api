@@ -12,19 +12,48 @@ from src.lib.exception.exception_handler import register_error_handlers
 def create_app():
     app = Flask(__name__)
 
+    app.config['MAX_CONTENT_LENGTH'] = 10 * 1024 * 1024 # 100MB
+
     CORS(
-        app
+        app,
+        resources={r"/*": {"origins": "*"}},
+        supports_credentials=True,
+        methods=["GET", "POST", "PUT", "PATCH", "HEAD", "PUT", "DELETE", "OPTIONS"],
+        allow_headers=[
+            'Content-Type',
+            'Access-Control-Allow-Origin',
+            'X-Requested-With',
+            'Accept',
+            'Origin',
+            'Access-Control-Request-method',
+            'Access-Control-Request-Headers',
+            'Authorization',
+            'App-Alert',
+            'X-Total-Count',
+            'File',
+            'Filename',
+            'X-File-Name',
+            'Cache-Control'
+        ],
+        expose_headers=[
+            'Access-Control-Allow-Origin',
+            'Access-Control-Allow-Credentials',
+            'Authorization',
+            'app-alert',
+            'app-alert-type',
+            'X-Total-Count',
+            'Filename'
+        ]
     )
 
-    # @app.before_request
-    # def basic_authentication():
-        # if request.method.lower() == 'options':
-            # return Response()
+    """
+    with app.app_context():
+        MongoDBManagerInstance.init_database()
 
-    @app.after_request
-    def per_request_callbacks(response):
-        response.headers['Access-Control-Allow-Origin'] = '*'
-        return response
+    @app.teardown_appcontext
+    def close_db(exception=None):
+        MongoDBManagerInstance.shutdown()
+    """
 
 
     @app.route("/")
