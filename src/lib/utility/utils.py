@@ -3,11 +3,15 @@ import time
 import uuid
 from json import JSONEncoder
 
+from bson import ObjectId
+
 
 # subclass JSONEncoder
 class MyJSONEncoder(JSONEncoder):
     def default(self, o):
         if isinstance(o, datetime.datetime):
+            return str(o)
+        if isinstance(o, ObjectId):
             return str(o)
         return o.__dict__
 

@@ -58,12 +58,12 @@ class UserManager(DataManagerBase):
         return f"user:{user_id}:me"
 
 
-class PasswordHistory(BaseModel):
+class PasswordHistory(DataBaseModel):
     password: str
     created_at: datetime
 
 
-class Account(BaseModel):
+class Account(DataBaseModel):
     status: str
     role: str
 
@@ -75,7 +75,7 @@ class Account(BaseModel):
         })
 
 
-class Address(BaseModel):
+class Address(DataBaseModel):
     street: str
     city: str
     state: str
@@ -128,12 +128,41 @@ class UserMe(UserAuthor):
             'address': fields.Nested(Address.to_model(name_space)),
         })
 
+    @staticmethod
+    def to_model_list(name_space: Namespace):
+        return name_space.model('UserMeModelList', {
+            'users': fields.List(fields.Nested(UserMe.to_model(name_space)), ),
+            'total': fields.Integer,
+            'page': fields.Integer,
+            'limit': fields.Integer,
+            'pageCount': fields.Integer,
+        })
+
 
 class User(UserMe):
     password: str
     password_history: list[PasswordHistory] = []
 
     preferences: list[str] = []
+    preferences_enable: bool = False
+
+
+    def to_author(self):
+        available_fields = {k for k in UserAuthor.model_fields.keys() if hasattr(self, k)}
+
+        author_data = self.model_dump(include=available_fields)
+        author_data['_id'] = self.user_id
+        return UserAuthor(**author_data)
+
+    def to_me(self):
+        available_fields = {k for k in UserMe.model_fields.keys() if hasattr(self, k)}
+        # print(available_fields)
+        me_data = self.model_dump(include=available_fields)
+        # print(me_data)
+        me_data['_id'] = self.user_id
+        me_data['user_id'] = self.user_id
+        # print(me_data)
+        return UserMe(**me_data)
 
 
     def to_author_json(self):
@@ -147,14 +176,15 @@ class User(UserMe):
     def to_me_json(self):
         return self.model_dump(
             by_alias=False,
-            exclude_none=True,
+            exclude_none=False,
             include=UserMe.model_fields.keys(),
             exclude={"created_at", "updated_at"},
         )
 
     def to_preferences_json(self):
         return {
-            "preferences": self.preferences
+            "preferences": self.preferences,
+            "preferences_enable": self.preferences_enable,
         }
 
 
@@ -167,6 +197,10 @@ class User(UserMe):
         if user_caching:
             api_logger.print_log()
             user_json = json.loads(user_caching, object_hook=my_json_decoder)
+            # print(f"user json before = {user_json}")
+            user_json['_id'] = ObjectId(user_json['user_id'])
+            # user_json['user_id'] = ObjectId(user_json['user_id'])
+            # print(f"user json after = {user_json}")
             return cls(**user_json)
         api_logger.print_error(message_error="Cache missing")
 
@@ -184,6 +218,18 @@ class User(UserMe):
         RedisManagerInstance.get_instance().set(key=user_key, value=user_json)
 
         return user
+
+    @classmethod
+    def get_directly(cls, user_id: str):
+
+        api_logger = ApiLogger(f"[MONGODB] [USER] [GET] : {user_id}")
+        result = UserManager.collection().find_one({"_id": ObjectId(user_id)})
+        if result is None:
+            api_logger.print_error("User does not exist")
+            return None
+        api_logger.print_log()
+
+        return cls(**result)
 
     def save(self):
         api_logger = ApiLogger(f"[MONGODB] [USER] [SAVE] : {self.to_json()}")
@@ -214,19 +260,21 @@ class User(UserMe):
         api_logger.print_log(extend_message=f"delete count: {delete_count}")
 
     def update_user(self):
-        api_logger = ApiLogger(f"[MONGODB] [USER] [UPDATE] : {self.user_id}")
+        api_logger = ApiLogger(f"[MONGODB] [USER] [UPDATE] : {self.to_json()}")
         result = UserManager.collection().update_one(
             filter={"_id": ObjectId(self.user_id)},
             update={
                 "$set": {
                     "firstname": self.firstname,
                     "lastname": self.lastname,
-                    "address": self.address,
+                    "address": self.address.to_json() if self.address else None,
                     "preferences": self.preferences,
+                    "preferences_enable": self.preferences_enable,
                     "updated_at": datetime.now(timezone.utc)
                 }
             }
         )
+        print(result)
         self._scache_user(user_id=str(self.user_id))
         api_logger.print_log(f"user updated: {result.modified_count > 0}")
         return result.modified_count > 0
@@ -311,9 +359,34 @@ class User(UserMe):
         api_logger.print_log()
         return cls(**user)
 
+    @staticmethod
+    def get_list_count():
+        api_logger = ApiLogger(f"[MONGODB] [USER COUNT] [ALL] ")
+        total = UserManager.collection().count_documents({})
+        api_logger.print_log()
+        return total if (total and total > 0) else 0
+
+    @classmethod
+    def get_list(cls, page: int = 1, limit: int = 10):
+        api_logger = ApiLogger(f"[MONGODB] [USER] [LIST] : page={page} and limit={limit}")
+
+        results = UserManager.collection().find(
+            filter={},
+            skip=limit * (page - 1),
+            limit=limit
+        )
+
+        api_logger.print_log()
+
+        if results:
+            return [cls(**result) for result in results]
+        return []
+
+
 
 class UserMePreferences(DataBaseModel):
     preferences: list[str] = []
+    preferences_enable: bool = True
 
     @classmethod
     def from_user(cls, user: User):
@@ -321,25 +394,69 @@ class UserMePreferences(DataBaseModel):
 
     @classmethod
     def get_preferences(cls, user_id: str):
-        user_preferences_key = UserManager.generate_user_me_key(user_id=user_id)
-
-        api_logger = ApiLogger(f"[REGIS] [USER] [GET PREFERENCES] : {user_id}")
-        preferences_caching = RedisManagerInstance.get_instance().get_list(key=user_preferences_key)
-        if preferences_caching:
-            api_logger.print_log()
-            return cls(preferences=preferences_caching)
-        api_logger.print_error(message_error="Cache missing")
-
         user = User.get(user_id=user_id)
         if user is None:
-            return cls(preferences=[])
-        RedisManagerInstance.get_instance().set_list(key=user_preferences_key, value=user.preferences, ex=60*60)
-        return cls(preferences=user.preferences)
+            return None
+
+        return cls(preferences=user.preferences, preferences_enable=user.preferences_enable)
 
     @staticmethod
     def to_model(name_space: Namespace):
         return name_space.model('UserMePreferencesModel', {
             'preferences': fields.List(fields.String, description="List of preferences (tags, categories, ...)"),
+            'preferences_enable': fields.Boolean(default=True, required=False),
         })
+
+
+class UserPreferencesDashboard(DataBaseModel):
+    tag: str
+    count: int
+
+    @staticmethod
+    def to_model(name_space: Namespace):
+        return name_space.model('UserPreferencesDashboardModel', {
+            'tag': fields.String(required=False),
+            'count': fields.Integer(required=False),
+        })
+
+    @classmethod
+    def get_most_tags(cls, limit: int = 5):
+        api_logger = ApiLogger(f"[MONGODB] [USER TAGS] [DASHBOARD] [MOST TAGS IN PREFERENCES] : limit={limit}")
+
+        pipeline = [
+            {
+                '$match': {
+                    'preferences': {'$exists': True, '$ne': []}
+                }
+            }, {
+                '$unwind': '$preferences'
+            }, {
+                '$group': {
+                    '_id': '$preferences',
+                    'count': {'$sum': 1}
+                }
+            }, {
+                '$sort': {
+                    'count': -1
+                }
+            }, {
+                '$limit': limit
+            }, {
+                '$project': {
+                    'tag': '$_id',
+                    'count': 1,
+                    '_id': 0
+                }
+            }
+        ]
+
+        stats = UserManager.collection().aggregate(pipeline)
+        if stats is None:
+            api_logger.print_error("Error during retrieving statistics")
+
+        stat_list = list(stats)
+        api_logger.print_log()
+
+        return [cls(**data) for data in stat_list]
 
 

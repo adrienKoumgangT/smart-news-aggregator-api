@@ -17,9 +17,9 @@ class UserMeResource(Resource):
     def get(self):
         user_token: UserToken = g.user
 
-        user_me = User.get(user_id=user_token.user_id)
+        user_me = User.get(user_id=user_token.user_id).to_me()
 
-        return user_me.to_me_json()
+        return user_me.to_json()
 
     @token_required
     @ns_user.expect(UserMe.to_model(name_space=ns_user))
@@ -33,7 +33,7 @@ class UserMeResource(Resource):
         lastname = data.get('lastname', None)
         address = data.get('address', None)
 
-        user = User.get(user_id=user_token.user_id)
+        user = User.get_directly(user_id=user_token.user_id)
 
         if user is None:
             return jsonify({"message": "Invalid user"}), 400
@@ -45,15 +45,15 @@ class UserMeResource(Resource):
         is_updated = user.update_user()
         if is_updated:
             # TODO: force to update token with new name value
-            return jsonify(user.to_me_json())
-        return jsonify({"message": "Error during update"}), 40
+            return jsonify(user.to_me().to_json())
+        return jsonify({"message": "Error during update"}), 400
 
 
-@ns_user.route('/me/preference')
+@ns_user.route('/article/preference')
 class UserMePreferenceResource(Resource):
 
     @token_required
-    @ns_user.marshal_with(Model.get_list_of_string_model(name_space=ns_user))
+    @ns_user.marshal_with(UserMePreferences.to_model(name_space=ns_user))
     def get(self):
         user_token: UserToken = g.user
 
@@ -65,22 +65,24 @@ class UserMePreferenceResource(Resource):
         return user.to_preferences_json()
 
     @token_required
-    @ns_user.expect(Model.get_list_of_string_model(name_space=ns_user))
-    @ns_user.marshal_with(Model.get_list_of_string_model(name_space=ns_user))
+    @ns_user.expect(UserMePreferences.to_model(name_space=ns_user))
+    @ns_user.marshal_with(UserMePreferences.to_model(name_space=ns_user))
     def post(self):
         user_token: UserToken = g.user
 
         data = request.get_json()
 
         preferences = data.get('preferences', [])
+        preferences_enable = data.get('preferences_enable', True)
 
-        user = User.get(user_id=user_token.user_id)
+        user = User.get_directly(user_id=user_token.user_id)
         if user is None:
             return jsonify({"message": "Invalid user"}), 400
         user.preferences = preferences
+        user.preferences_enable = preferences_enable
 
         is_updated = user.update_user()
         if is_updated:
-            return jsonify(user.to_preferences_json())
+            return user.to_preferences_json()
         return jsonify({"message": "Error during update"}), 400
 

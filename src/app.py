@@ -2,6 +2,7 @@ from flask import Flask, Blueprint, render_template_string, request, Response
 from flask_cors import CORS
 from flask_restx import Api
 
+from src.apps.admin_endpoint import ns_admin
 from src.apps.article_endpoint import ns_article
 from src.apps.auth_endpoint import ns_auth
 from src.apps.test_endpoint import ns_test
@@ -107,6 +108,8 @@ def create_app():
         authorizations=authorizations,
         security="BearerAuth"  # Apply to all routes unless overridden
     )
+
+    api.add_namespace(ns_admin, path='/admin')
 
     api.add_namespace(ns_auth, path='/auth')
     api.add_namespace(ns_user, path='/user')

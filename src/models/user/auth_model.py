@@ -85,8 +85,8 @@ class UserToken(DataBaseModel):
             'firstname': fields.String(required=True),
             'lastname': fields.String(required=True),
             'email': fields.String(required=True),
-            'status': fields.String(required=False),
-            'role': fields.String(required=False),
+            'status': fields.String(required=True),
+            'role': fields.String(required=True),
         })
 
 class AuthEventLogManager:

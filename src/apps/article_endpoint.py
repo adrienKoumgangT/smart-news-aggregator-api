@@ -3,14 +3,47 @@ from flask_restx import Namespace, Resource
 
 from src.apps import token_required
 from src.lib.exception.exception_server import NotFoundException, UnauthorizedException
-from src.models.article.article_model import ArticleSummaryModel, ArticleModel, ArticleWithInteractionModel
+from src.models.article.article_model import ArticleSummaryModel, ArticleModel, ArticleWithInteractionModel, \
+    ArticleTagsModel
 from src.models.article.comment_model import CommentModel
 from src.models.article.user_article_interaction_models import UserArticleInteractionModel, UserArticleInteraction, \
-    ArticleInteractionStatus
+    ArticleInteractionStatus, ArticleInteractionType
+from src.models.model import Model
 from src.models.user.auth_model import UserToken
-from src.models.user.user_model import UserAuthor
+from src.models.user.user_model import UserAuthor, User
 
 ns_article = Namespace('article', description='Article endpoint')
+
+
+@ns_article.route('/tags')
+class ArticleTags(Resource):
+
+    @token_required
+    @ns_article.marshal_with(ArticleTagsModel.to_model(name_space=ns_article), code=200)
+    def get(self):
+        user_token: UserToken = g.user
+
+        tags = ArticleModel.get_all_tags()
+
+        result = ArticleTagsModel(tags=tags)
+
+        return result.to_json()
+
+    @token_required
+    @ns_article.expect(Model.get_search_model(name_space=ns_article))
+    @ns_article.marshal_with(ArticleTagsModel.to_model(name_space=ns_article), code=200)
+    def post(self):
+        user_token: UserToken = g.user
+
+        data = request.get_json()
+        search = data.get('search', None)
+
+        tags = ArticleModel.get_all_tags(search=search)
+
+        result = ArticleTagsModel(tags=tags)
+
+        return result.to_json()
+
 
 
 @ns_article.route('/latest')
@@ -29,12 +62,20 @@ class LatestArticleResource(Resource):
 
         user_token: UserToken = g.user
 
-        articles = ArticleModel.last_articles(page=page, limit=limit)
+        user = User.get(user_id=user_token.user_id)
+
+        if user.preferences_enable and user.preferences:
+            total = ArticleModel.last_articles_count(preferences=user.preferences)
+            articles = ArticleModel.last_articles(preferences=user.preferences, page=page, limit=limit)
+        else:
+            total = ArticleModel.last_articles_count()
+            articles = ArticleModel.last_articles(page=page, limit=limit)
 
         return {
             "articles": [article.to_summary() for article in articles],
-            "total": len(articles)*10,
+            "total": total,
             "page": page,
+            "limit": limit,
             "pageCount": len(articles),
         }
 
@@ -45,7 +86,7 @@ class LatestArticleResource(Resource):
 class ArticleHistoryResource(Resource):
 
     @token_required
-    @ns_article.marshal_with(ArticleSummaryModel.to_model(name_space=ns_article))
+    @ns_article.marshal_with(UserArticleInteractionModel.to_model_list(name_space=ns_article))
     def get(self):
         page_arg = request.args.get('page', default=1, type=int)
         limit_arg = request.args.get('limit', default=5, type=int)
@@ -55,11 +96,18 @@ class ArticleHistoryResource(Resource):
 
         user_token: UserToken = g.user
 
-        histories = UserArticleInteractionModel.get_read_history(user_id=user_token.id, page=page, limit=limit)
+        total = UserArticleInteractionModel.read_history_count(user_id=user_token.user_id)
+        histories = UserArticleInteractionModel.get_read_history(user_id=user_token.user_id, page=page, limit=limit)
 
         result = [history.to_json() for history in histories]
 
-        return {"history": result}
+        return {
+            "interactions": result,
+            "page": page,
+            "limit": limit,
+            "pageCount": len(histories),
+            "total": total,
+        }
 
 
 @ns_article.route('/<string:article_id>')
@@ -67,7 +115,7 @@ class ArticleHistoryResource(Resource):
 class ArticleSummaryResource(Resource):
 
     @token_required
-    @ns_article.marshal_with(ArticleSummaryModel.to_model(name_space=ns_article))
+    @ns_article.marshal_with(ArticleModel.to_model(name_space=ns_article))
     def get(self, article_id):
         user_token: UserToken = g.user
 
@@ -86,25 +134,11 @@ class ArticleSummaryResource(Resource):
 
         UserArticleInteractionModel.update_interaction_read(
             user_id=user_token.user_id,
-            article_id=article_id
+            article_id=article_id,
+            article_title=article.title
         )
 
         return article.to_json()
-
-    @token_required
-    def delete(self, article_id):
-        user_token: UserToken = g.user
-
-        if user_token.role != 'admin':
-            raise UnauthorizedException("You are not authorized to perform this action")
-
-        article = ArticleModel.get(article_id=article_id)
-
-        if not article:
-            raise NotFoundException("Article not found")
-
-        article.delete()
-        return {"success": True, "message": "Article deleted"}
 
 
 @ns_article.route('/<string:article_id>/summary')
@@ -132,22 +166,22 @@ class ArticleInteractionResource(Resource):
     def get(self, article_id):
         user_token: UserToken = g.user
 
-        interaction = UserArticleInteractionModel.get_by_user_article(user_id=user_token.id, article_id=article_id)
+        interaction = UserArticleInteractionModel.get_by_user_article(user_id=user_token.user_id, article_id=article_id)
 
         if interaction:
             return interaction.to_json()
 
-        return UserArticleInteractionModel(_id=None, level_interaction="article", user_id=user_token.id, article_id=article_id).to_json()
+        return UserArticleInteractionModel(_id=None, level_interaction="article", user_id=user_token.user_id, article_id=article_id).to_json()
 
     @token_required
-    @ns_article.expect(UserArticleInteraction.to_model(name_space=ns_article))
-    @ns_article.marshal_with(UserArticleInteractionModel.to_model(name_space=ns_article))
+    @ns_article.expect(ArticleInteractionType.to_model(name_space=ns_article))
+    @ns_article.marshal_with(Model.get_message_response_model(name_space=ns_article))
     def post(self, article_id):
         user_token: UserToken = g.user
 
         data = request.get_json()
-        interaction = UserArticleInteraction(**data)
-        result = UserArticleInteractionModel.update_interaction(interaction=interaction, user_id=user_token.id, article_id=article_id)
+        interaction = ArticleInteractionType(**data)
+        result = UserArticleInteractionModel.update_interaction(interaction=interaction, user_id=user_token.user_id, article_id=article_id)
 
         if result:
             return {"success": True, "message": "Interaction updated"}
@@ -174,7 +208,7 @@ class ArticleCommentResource(Resource):
         comments = CommentModel.last_comments(article_id=article_id, page=page, limit=limit)
         comments_result = []
         for comment in comments:
-            user_author = UserAuthor.get(user_id=comment.user_id)
+            user_author = User.get(user_id=comment.user_id).to_author()
             comments_result.append(comment.to_json() | {"author": (user_author.to_json() if user_author else None)})
 
         return {'comments': comments_result}
@@ -206,6 +240,11 @@ class ArticleCommentResource2(Resource):
     def get(self, article_id, comment_id):
         user_token: UserToken = g.user
 
+        article = ArticleModel.get(article_id=article_id)
+
+        if article is None:
+            raise NotFoundException("Article not found")
+
         comment = CommentModel.get(comment_id=comment_id)
 
         if comment is None:
@@ -214,6 +253,7 @@ class ArticleCommentResource2(Resource):
         UserArticleInteractionModel.update_interaction_read(
             user_id=user_token.user_id,
             article_id=article_id,
+            article_title=article.title,
             comment_id=comment_id
         )
 

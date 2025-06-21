@@ -3,7 +3,7 @@ from functools import wraps
 from flask import request, g
 
 from src.lib.authentication.auth_token import TokenManager
-from src.lib.exception.exception_server import TokenException
+from src.lib.exception.exception_server import TokenException, UnauthorizedException
 
 
 def token_required(f):
@@ -21,6 +21,10 @@ def token_required(f):
 
         try:
             user = TokenManager.decode_token(token=token)
+
+            if 'admin' in request.url and user.role != 'admin':
+                raise UnauthorizedException('You are not authorized to perform this operation')
+
             g.user = user
         except TokenException as e:
             return {'error': str(e)}, 401

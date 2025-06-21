@@ -1,7 +1,9 @@
 import json
 from typing import Optional
 
+from bson import ObjectId
 from flask import Request
+from flask_restx import Namespace, fields
 from pydantic import Field, field_serializer
 
 from src.lib.configuration import configuration
@@ -41,6 +43,26 @@ class ServerErrorLogModel(MongoDBBaseModel):
     def serialize_id(self, id_value: PydanticObjectId, _info):
         return str(id_value) if id_value else None
 
+    @staticmethod
+    def to_model(name_space: Namespace):
+        return name_space.model('ServerErrorLogModel', {
+            'server_error_log_id': fields.String(required=False),
+            'request_data': fields.Nested(RequestData.to_model(name_space)),
+            'curl': fields.String(required=False),
+            'exception_name': fields.String(required=False),
+            'exception_message': fields.String(required=False),
+        })
+
+    @staticmethod
+    def to_model_list(name_space: Namespace):
+        return name_space.model('ServerErrorLogModelList', {
+            'errors': fields.List(fields.Nested(ServerErrorLogModel.to_model(name_space)), ),
+            'total': fields.Integer,
+            'page': fields.Integer,
+            'limit': fields.Integer,
+            'pageCount': fields.Integer,
+        })
+
 
     def save(self):
         api_logger = ApiLogger(f"[MONGODB] [SERVER ERROR LOG] [SAVE] : {self.to_json()}")
@@ -53,6 +75,13 @@ class ServerErrorLogModel(MongoDBBaseModel):
         api_logger.print_log(f"Server Error Log ID: {self.server_error_log_id}")
         return self.server_error_log_id
 
+    def delete(self):
+        api_logger = ApiLogger(f"[MONGODB] [SERVER ERROR LOG] [DELETE] : {self.user_id}")
+        result = ServerErrorLogManager.collection().delete_one(
+            {"_id": ObjectId(self.server_error_log_id)}
+        )
+        api_logger.print_log(f"user deleted: {result.deleted_count > 0}")
+        return result.deleted_count > 0
 
     @classmethod
     def from_request(cls, request: Request, exception_name:str, exception_message:str):
@@ -78,6 +107,42 @@ class ServerErrorLogModel(MongoDBBaseModel):
             exception_name=exception_name,
             exception_message=exception_message
         )
+
+    @classmethod
+    def get(cls, server_error_log_id):
+        api_logger = ApiLogger(f"[MONGODB] [SERVER ERROR LOG] [GET] : {server_error_log_id}")
+
+        result = ServerErrorLogManager.collection().find_one({'_id': ObjectId(server_error_log_id)})
+        if result is None:
+            api_logger.print_error("Errors does not exist")
+            return None
+        api_logger.print_log()
+
+        return cls(**result)
+
+    @staticmethod
+    def get_list_count():
+        api_logger = ApiLogger(f"[MONGODB] [SERVER ERROR LOG COUNT] [ALL] ")
+        total = ServerErrorLogManager.collection().count_documents({})
+        api_logger.print_log()
+        return total if (total and total > 0) else 0
+
+    @classmethod
+    def get_list(cls, page: int = 1, limit: int = 10):
+        api_logger = ApiLogger(f"[MONGODB] [SERVER ERROR LOG] [LIST] : page={page} and limit={limit}")
+        sort = list({'created_at': -1}.items())
+        results = ServerErrorLogManager.collection().find(
+            filter={},
+            sort=sort,
+            skip=limit * (page - 1),
+            limit=limit
+        )
+
+        api_logger.print_log()
+
+        if results:
+            return [cls(**result) for result in results]
+        return []
 
 
 

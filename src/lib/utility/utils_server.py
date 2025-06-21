@@ -1,16 +1,29 @@
 from typing import Optional
 
 from flask import Request
-from pydantic import BaseModel
+from flask_restx import Namespace, fields
+
+from src.models import DataBaseModel
 
 
-class RequestData(BaseModel):
+class RequestData(DataBaseModel):
     url: Optional[str]
     method: Optional[str]
     body: Optional[dict] = {}
     args: Optional[dict] = {}
     headers: Optional[dict] = {}
     form: Optional[dict] = {}
+
+    @staticmethod
+    def to_model(name_space: Namespace):
+        return name_space.model('UserMePreferencesModel', {
+            'url': fields.String(required=False),
+            'method': fields.String(required=False),
+            'body': fields.Raw(required=False),
+            'args': fields.Raw(required=False),
+            'headers': fields.Raw(required=False),
+            'form': fields.Raw(required=False),
+        })
 
     @classmethod
     def from_request(cls, request: Request):

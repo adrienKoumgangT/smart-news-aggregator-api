@@ -24,3 +24,11 @@ class MongoDBBaseModel(BaseModel):
     def delete(self):
         raise NotImplementedError
 
+    @staticmethod
+    def get_list_count():
+        raise NotImplementedError
+
+    @classmethod
+    def get_list(cls):
+        raise NotImplementedError
+

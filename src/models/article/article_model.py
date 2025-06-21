@@ -13,7 +13,7 @@ from src.lib.database.nosql.document.mongodb.objectid import PydanticObjectId
 from src.lib.database.nosql.keyvalue.redis.redis_manager import RedisManagerInstance
 from src.lib.log.api_logger import ApiLogger
 from src.lib.utility.utils import my_json_decoder, MyJSONEncoder
-from src.models import DataManagerBase
+from src.models import DataManagerBase, DataBaseModel
 from src.models.article.user_article_interaction_models import ArticleInteractionStatus, ArticleInteractionStats
 
 
@@ -33,6 +33,7 @@ class ArticleManager(DataManagerBase):
 
     @staticmethod
     def init_database():
+        ArticleManager.collection().createIndex({ "tags": 1 })
         ArticleManager.collection().createIndex({ "published_at": -1 })
         ArticleManager.collection().create_index([("tags", 1), ("published_at", -1)])
 
@@ -98,7 +99,8 @@ class ArticleSummaryModel(MongoDBBaseModel):
         return name_space.model('ArticleSummaryModelList', {
             'articles': fields.List(fields.Nested(ArticleSummaryModel.to_model(name_space)),),
             'total': fields.Integer,
-            'pages': fields.Integer,
+            'page': fields.Integer,
+            'limit': fields.Integer,
             'pageCount': fields.Integer,
         })
 
@@ -129,7 +131,7 @@ class ArticleModel(ArticleSummaryModel):
         })
 
     @staticmethod
-    def to_model_list(name_space: Namespace):
+    def  to_model_list(name_space: Namespace):
         return name_space.model('ArticleModelList', {
             'articles': fields.List(fields.Nested(ArticleModel.to_model(name_space)), ),
             'total': fields.Integer,
@@ -194,13 +196,83 @@ class ArticleModel(ArticleSummaryModel):
 
         # article_json = json.dumps(article, cls=MyJSONEncoder)
         article_json = json.dumps(article.to_json())
-        RedisManagerInstance.get_instance().set(key=article_key, value=article_json, ex=60*10)
+        RedisManagerInstance.get_instance().set(key=article_key, value=article_json, ex=60*20)
 
         return article
 
+    def delete(self):
+        api_logger = ApiLogger(f"[MONGODB] [ARTICLE] [DELETE] : {self.article_id}")
+        result = ArticleManager.collection().delete_one(
+            {"_id": ObjectId(self.article_id)}
+        )
+        api_logger.print_log(f"Article deleted: {result.deleted_count > 0}")
+        return result.deleted_count > 0
+
+    @staticmethod
+    def get_all_tags(search: str = None):
+        api_logger = ApiLogger(f"[MONGODB] [ARTICLE TAGS] [GET ALL] : search = {search}")
+        if search:
+            pipeline = [
+                {"$unwind": "$tags"},
+                {"$match": {"tags": {"$regex": f"^{search}", "$options": "i"}}},
+                {"$group": {"_id": None, "matchedTags": {"$addToSet": "$tags"}}},
+                {"$project": {"_id": 0, "matchedTags": 1}}
+            ]
+        else:
+            pipeline = [
+                {"$unwind": "$tags"},
+                {"$group": {"_id": None, "matchedTags": {"$addToSet": "$tags"}}},
+                {"$project": {"_id": 0, "matchedTags": 1}}
+            ]
+
+        result = list(ArticleManager.collection().aggregate(pipeline))
+        tags = result[0]['matchedTags'] if result else []
+
+        api_logger.print_log()
+        return tags
+
+    @staticmethod
+    def get_list_count():
+        api_logger = ApiLogger(f"[MONGODB] [ARTICLE COUNT] [ALL] ")
+        total = ArticleManager.collection().count_documents({})
+        api_logger.print_log()
+        return total if (total and total > 0) else 0
+
+    @classmethod
+    def get_list(cls, page: int = 1, limit: int = 10):
+        api_logger = ApiLogger(f"[MONGODB] [ARTICLE] [LIST] : page={page} and limit={limit}")
+
+        results = ArticleManager.collection().find(
+            filter={},
+            skip=limit * (page - 1),
+            limit=limit
+        )
+
+        api_logger.print_log()
+
+        if results:
+            return [cls(**result) for result in results]
+        return []
+
+    @staticmethod
+    def last_articles_count(preferences: list[str] = None):
+        api_logger = ApiLogger(f"[MONGODB] [ARTICLE COUNT] [GET] : preferences={preferences}")
+        if preferences:
+            filter_search = {
+                'tags': {
+                    '$in': preferences
+                }
+            }
+        else:
+            filter_search = {}
+        total = ArticleManager.collection().count_documents(filter_search)
+        api_logger.print_log()
+        return total if (total and total > 0) else 0
+
+
     @classmethod
     def last_articles(cls, preferences: list[str] = None, page: int = 1, limit: int = 10):
-        api_logger = ApiLogger(f"[MONGODB] [ARTICLE SUMMARY] [GET] : page={page} and limit={limit}")
+        api_logger = ApiLogger(f"[MONGODB] [ARTICLE LATEST] [GET] : page={page}, limit={limit} and preferences={preferences}")
         if preferences:
             filter_search = {
                 'tags': {
@@ -212,7 +284,6 @@ class ArticleModel(ArticleSummaryModel):
         sort = list({
                         'published_at': -1
                     }.items())
-        limit = 10
 
         results = ArticleManager.collection().find(
             filter=filter_search,
@@ -259,8 +330,20 @@ class ArticleWithInteractionModel(ArticleModel):
         return name_space.model('ArticleWithInteractionModelList', {
             'articles': fields.List(fields.Nested(ArticleWithInteractionModel.to_model(name_space)), ),
             'total': fields.Integer,
-            'pages': fields.Integer,
+            'page': fields.Integer,
+            'limit': fields.Integer,
             'pageCount': fields.Integer,
         })
+
+
+class ArticleTagsModel(DataBaseModel):
+    tags: list[str] = []
+
+    @staticmethod
+    def to_model(name_space: Namespace):
+        return name_space.model('ArticleTagsModel', {
+            'tags': fields.List(fields.String, description="List of tags"),
+        })
+
 
 
