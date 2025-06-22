@@ -4,7 +4,7 @@ from flask_restx import Namespace, Resource
 from src.apps import token_required
 from src.lib.exception.exception_server import NotFoundException, UnauthorizedException
 from src.models.article.article_model import ArticleSummaryModel, ArticleModel, ArticleWithInteractionModel, \
-    ArticleTagsModel
+    ArticleTagsModel, ArticleUtility
 from src.models.article.comment_model import CommentModel
 from src.models.article.user_article_interaction_models import UserArticleInteractionModel, UserArticleInteraction, \
     ArticleInteractionStatus, ArticleInteractionType
@@ -70,6 +70,8 @@ class LatestArticleResource(Resource):
         else:
             total = ArticleModel.last_articles_count()
             articles = ArticleModel.last_articles(page=page, limit=limit)
+
+        ArticleUtility.cache_articles(articles=articles)
 
         return {
             "articles": [article.to_summary() for article in articles],

@@ -1,4 +1,5 @@
 import json
+from datetime import timedelta
 from typing import Optional, Any
 
 import redis
@@ -11,7 +12,7 @@ class RedisManager:
         self.redis_url = redis_url
         self.client = redis.Redis.from_url(self.redis_url)
 
-    def set(self, key: str, value: str, ex: Optional[int] = None):
+    def set(self, key: str, value: str, ex: Optional[int | timedelta] = None):
         return self.client.set(key, value, ex=ex)
 
     def get(self, key: str) -> Optional[str]:

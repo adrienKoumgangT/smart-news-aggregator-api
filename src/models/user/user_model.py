@@ -1,11 +1,11 @@
-# from __future__ import annotations
 import json
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
+from threading import Thread
 from typing import Optional
 
 from bson import ObjectId
 from flask_restx import fields, Namespace
-from pydantic import BaseModel, Field, field_serializer
+from pydantic import Field, field_serializer
 from pymongo.errors import DuplicateKeyError
 
 from src.lib.authentication.password import hash_password
@@ -56,6 +56,10 @@ class UserManager(DataManagerBase):
     @staticmethod
     def generate_user_key(user_id: str):
         return f"user:{user_id}:me"
+
+    @staticmethod
+    def generate_user_count_key(after_date: datetime = None, before_date: datetime = None):
+        return f"users:count:{after_date}:{before_date}"
 
 
 class PasswordHistory(DataBaseModel):
@@ -187,9 +191,37 @@ class User(UserMe):
             "preferences_enable": self.preferences_enable,
         }
 
+    @staticmethod
+    def scache(user_id: str):
+        user_key = UserManager.generate_user_key(user_id=user_id)
+
+        api_logger = ApiLogger(f"[REDIS] [USER] [SCACHE] : {user_key}")
+
+        RedisManagerInstance.get_instance().delete(key=user_key)
+
+        api_logger.print_log()
+
+    def _cache(self):
+        user_key = UserManager.generate_user_key(user_id=str(self.user_id))
+
+        api_logger = ApiLogger(f"[REDIS] [USER] [CACHE] : {user_key}")
+
+        user_json = json.dumps(self, cls=MyJSONEncoder)
+        RedisManagerInstance.get_instance().set(key=user_key, value=user_json, ex=timedelta(hours=1))
+
+        api_logger.print_log()
+
+    def _scache(self):
+        user_key = UserManager.generate_user_key(user_id=str(self.user_id))
+
+        api_logger = ApiLogger(f"[REDIS] [USER] [SCACHE] : {user_key}")
+
+        RedisManagerInstance.get_instance().delete(key=user_key)
+
+        api_logger.print_log()
 
     @classmethod
-    def get(cls, user_id: str):
+    def _get(cls, user_id: str):
         user_key = UserManager.generate_user_key(user_id=user_id)
 
         api_logger = ApiLogger(f"[REDIS] [USER] [GET] : {user_id}")
@@ -197,12 +229,16 @@ class User(UserMe):
         if user_caching:
             api_logger.print_log()
             user_json = json.loads(user_caching, object_hook=my_json_decoder)
-            # print(f"user json before = {user_json}")
             user_json['_id'] = ObjectId(user_json['user_id'])
-            # user_json['user_id'] = ObjectId(user_json['user_id'])
-            # print(f"user json after = {user_json}")
             return cls(**user_json)
         api_logger.print_error(message_error="Cache missing")
+        return None
+
+    @classmethod
+    def get(cls, user_id: str):
+        user = cls._get(user_id=user_id)
+        if user:
+            return user
 
         api_logger = ApiLogger(f"[MONGODB] [USER] [GET] : {user_id}")
         result = UserManager.collection().find_one({"_id": ObjectId(user_id)})
@@ -213,9 +249,7 @@ class User(UserMe):
 
         user = cls(**result)
 
-        # print(user.to_json())
-        user_json = json.dumps(user, cls=MyJSONEncoder)
-        RedisManagerInstance.get_instance().set(key=user_key, value=user_json)
+        user._cache()
 
         return user
 
@@ -251,14 +285,6 @@ class User(UserMe):
 
         api_logger.print_log(extend_message=f"delete count: {delete_count}")
 
-    @staticmethod
-    def _scache_user(user_id: str):
-        api_logger = ApiLogger(f"[REDIS] [USER] [SCACHE] : {user_id}")
-
-        delete_count = RedisManagerInstance.get_instance().delete_pattern(pattern=f"user:{user_id}:*")
-
-        api_logger.print_log(extend_message=f"delete count: {delete_count}")
-
     def update_user(self):
         api_logger = ApiLogger(f"[MONGODB] [USER] [UPDATE] : {self.to_json()}")
         result = UserManager.collection().update_one(
@@ -275,13 +301,9 @@ class User(UserMe):
             }
         )
         print(result)
-        self._scache_user(user_id=str(self.user_id))
+        self._scache()
         api_logger.print_log(f"user updated: {result.modified_count > 0}")
         return result.modified_count > 0
-
-    @staticmethod
-    def _scache_account(user_id: str):
-        RedisManagerInstance.get_instance().delete(key=UserManager.generate_user_account_key(user_id=user_id))
 
     @classmethod
     def update_account(cls, user_id: str, account: Account):
@@ -301,7 +323,7 @@ class User(UserMe):
                 }
             }
         )
-        cls._scache_account(user_id=user_id)
+        cls.scache(user_id=user_id)
         api_logger.print_log(f"user updated: {result.modified_count > 0}")
         return result.modified_count > 0
 
@@ -360,10 +382,73 @@ class User(UserMe):
         return cls(**user)
 
     @staticmethod
-    def get_list_count():
-        api_logger = ApiLogger(f"[MONGODB] [USER COUNT] [ALL] ")
-        total = UserManager.collection().count_documents({})
+    def _cache_users_count(user_count: int, after_date: datetime = None, before_date: datetime = None):
+        api_logger = ApiLogger(f"[REDIS] [USER COUNT] [SET] : user_count0 {user_count}, after_date = {after_date} and before_date = {before_date}")
+
+        user_count_key = UserManager.generate_user_count_key(after_date=after_date, before_date=before_date)
+
+        RedisManagerInstance.get_instance().set(key=user_count_key, value=str(user_count), ex=timedelta(hours=1))
+
         api_logger.print_log()
+
+    @staticmethod
+    def _scache_users_count(after_date: datetime = None, before_date: datetime = None):
+        api_logger = ApiLogger(f"[REDIS] [USER COUNT] [DELETE] : after_date = {after_date} and before_date = {before_date}")
+
+        user_count_key = UserManager.generate_user_count_key(after_date=after_date, before_date=before_date)
+
+        RedisManagerInstance.get_instance().delete(key=user_count_key)
+
+        api_logger.print_log()
+
+    @staticmethod
+    def _get_list_count(after_date: datetime = None, before_date: datetime = None):
+        api_logger = ApiLogger(f"[REDIS] [USER COUNT] [GET] : after_date = {after_date} and before_date = {before_date}")
+
+        user_count_key = UserManager.generate_user_count_key(after_date=after_date, before_date=before_date)
+
+        user_count = RedisManagerInstance.get_instance().get(key=user_count_key)
+
+        if user_count:
+            api_logger.print_log()
+            return int(user_count)
+        api_logger.print_error("Cache missing")
+        return None
+
+    @staticmethod
+    def get_list_count(after_date: datetime = None, before_date: datetime = None):
+        total = User._get_list_count(after_date=after_date, before_date=before_date)
+        if total:
+            return total
+
+        api_logger = ApiLogger(f"[MONGODB] [USER COUNT] [ALL] : after_date = {after_date} and before_date = {before_date}")
+        if after_date or before_date:
+            match_created_at = ({}
+                                | ({'$gt': after_date} if after_date else {})
+                                | ({'$lt': before_date} if before_date else {}))
+            pipeline = [
+                {
+                    '$match': {'created_at': match_created_at}
+                }, {
+                    '$count': 'users_count'
+                }
+            ]
+            result = UserManager.collection().aggregate(pipeline)
+            if result:
+                stats = list(result)
+                print(stats)
+                if stats:
+                    total = stats[0]['users_count']
+                else:
+                    total = 0
+            else:
+                total = 0
+        else:
+            total = UserManager.collection().count_documents({})
+        api_logger.print_log()
+
+        User._cache_users_count(user_count=total, after_date=after_date, before_date=before_date)
+
         return total if (total and total > 0) else 0
 
     @classmethod
@@ -458,5 +543,20 @@ class UserPreferencesDashboard(DataBaseModel):
         api_logger.print_log()
 
         return [cls(**data) for data in stat_list]
+
+
+class UserUtility:
+
+    @staticmethod
+    def _cache_users(users: list[User]):
+        for user in users:
+            _ = User.get(user_id=str(user.user_id))
+
+    @staticmethod
+    def cache_users(users: list[User]):
+        thread = Thread(target=UserUtility._cache_users, args=(users,))
+        thread.daemon = True
+        thread.start()
+
 
 

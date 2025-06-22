@@ -1,3 +1,4 @@
+from datetime import datetime
 from typing import Optional
 
 from bson import ObjectId
@@ -118,6 +119,52 @@ class CommentModel(MongoDBBaseModel):
         results = CommentManager.collection().find(
             {'user_id': user_id},
         ).sort('insert_at', -1).skip(limit * (page-1)).limit(limit)
+
+        api_logger.print_log()
+
+        if results:
+            return [cls(**result) for result in results]
+        return []
+
+    @staticmethod
+    def get_list_count(article_id: str =None, after_date: datetime = None, before_date: datetime = None):
+        api_logger = ApiLogger(f"[MONGODB] [COMMENT COUNT] [ALL] : after_date = {after_date} and before_date = {before_date}")
+        if after_date or before_date:
+            match_created_at = ({}
+                                | ({'$gt': after_date} if after_date else {})
+                                | ({'$lt': before_date} if before_date else {}))
+            match = ({'article_id': article_id} if article_id else {}) | match_created_at
+            pipeline = [
+                {
+                    '$match': match
+                }, {
+                    '$count': 'comments_count'
+                }
+            ]
+            result = CommentManager.collection().aggregate(pipeline)
+            if result:
+                stats = list(result)
+                print(stats)
+                if stats:
+                    total = stats[0]['comments_count']
+                else:
+                    total = 0
+            else:
+                total = 0
+        else:
+            total = CommentManager.collection().count_documents({})
+        api_logger.print_log()
+        return total if (total and total > 0) else 0
+
+    @classmethod
+    def get_list(cls, article_id: str =None, page: int = 1, limit: int = 10):
+        api_logger = ApiLogger(f"[MONGODB] [COMMENT] [LIST] : page={page} and limit={limit}")
+
+        results = CommentManager.collection().find(
+            filter={'article_id': article_id} if article_id else {},
+            skip=limit * (page - 1),
+            limit=limit
+        )
 
         api_logger.print_log()
 

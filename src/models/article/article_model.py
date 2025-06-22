@@ -1,4 +1,6 @@
 import json
+from datetime import datetime, timedelta
+from threading import Thread
 from typing import Optional, List
 
 from bson import ObjectId
@@ -12,7 +14,6 @@ from src.lib.database.nosql.document.mongodb.mongodb_manager import mongodb_clie
 from src.lib.database.nosql.document.mongodb.objectid import PydanticObjectId
 from src.lib.database.nosql.keyvalue.redis.redis_manager import RedisManagerInstance
 from src.lib.log.api_logger import ApiLogger
-from src.lib.utility.utils import my_json_decoder, MyJSONEncoder
 from src.models import DataManagerBase, DataBaseModel
 from src.models.article.user_article_interaction_models import ArticleInteractionStatus, ArticleInteractionStats
 
@@ -44,6 +45,10 @@ class ArticleManager(DataManagerBase):
     @staticmethod
     def generate_article_stats_key(article_id: str):
         return f"article:{article_id}:stats"
+
+    @staticmethod
+    def generate_article_count_key(after_date: datetime = None, before_date: datetime = None):
+        return f"article:count:{after_date}:{before_date}"
 
 
 class ArticleSourceModel(BaseModel):
@@ -171,8 +176,27 @@ class ArticleModel(ArticleSummaryModel):
 
         return self.article_id
 
+    def _scache(self):
+        article_key = ArticleManager.generate_article_key(article_id=str(self.article_id))
+
+        api_logger = ApiLogger(f"[REDIS] [ARTICLE] [SCACHE] : {article_key}")
+
+        RedisManagerInstance.get_instance().delete(key=article_key)
+
+        api_logger.print_log()
+
+    def _cache(self):
+        article_key = ArticleManager.generate_article_key(article_id=str(self.article_id))
+
+        api_logger = ApiLogger(f"[REDIS] [ARTICLE] [CACHE] : {article_key}")
+
+        article_json = json.dumps(self.to_json())
+        RedisManagerInstance.get_instance().set(key=article_key, value=article_json, ex=timedelta(minutes=30))
+
+        api_logger.print_log()
+
     @classmethod
-    def get(cls, article_id: str):
+    def _get(cls, article_id: str):
         article_key = ArticleManager.generate_article_key(article_id=article_id)
 
         api_logger = ApiLogger(f"[REDIS] [ARTICLE] [GET] : {article_id}")
@@ -183,6 +207,13 @@ class ArticleModel(ArticleSummaryModel):
             article_json = json.loads(article_caching)
             return cls(**article_json)
         api_logger.print_error(message_error="Cache missing")
+        return None
+
+    @classmethod
+    def get(cls, article_id: str):
+        article = cls._get(article_id)
+        if article:
+            return article
 
         api_logger = ApiLogger(f"[MONGODB] [ARTICLE] [GET] : {article_id}")
 
@@ -194,9 +225,7 @@ class ArticleModel(ArticleSummaryModel):
 
         article = cls(**result)
 
-        # article_json = json.dumps(article, cls=MyJSONEncoder)
-        article_json = json.dumps(article.to_json())
-        RedisManagerInstance.get_instance().set(key=article_key, value=article_json, ex=60*20)
+        article._cache()
 
         return article
 
@@ -232,10 +261,63 @@ class ArticleModel(ArticleSummaryModel):
         return tags
 
     @staticmethod
-    def get_list_count():
-        api_logger = ApiLogger(f"[MONGODB] [ARTICLE COUNT] [ALL] ")
-        total = ArticleManager.collection().count_documents({})
+    def _cache_articles_count(article_count: int, after_date: datetime = None, before_date: datetime = None):
+        api_logger = ApiLogger(f"[REDIS] [ARTICLE COUNT] [SET] : after_date = {after_date} and before_date = {before_date}")
+
+        article_count_key = ArticleManager.generate_article_count_key(after_date=after_date, before_date=before_date)
+
+        RedisManagerInstance.get_instance().set(key=article_count_key, value=str(article_count), ex=timedelta(minutes=30))
+
         api_logger.print_log()
+
+    @staticmethod
+    def _get_list_count(after_date: datetime = None, before_date: datetime = None):
+        api_logger = ApiLogger(f"[REDIS] [ARTICLE COUNT] [GET] : after_date = {after_date} and before_date = {before_date}")
+
+        article_count_key = ArticleManager.generate_article_count_key(after_date=after_date, before_date=before_date)
+
+        article_count = RedisManagerInstance.get_instance().get(key=article_count_key)
+
+        if article_count:
+            api_logger.print_log()
+            return int(article_count)
+        api_logger.print_error("Cache missing")
+        return None
+
+    @staticmethod
+    def get_list_count(after_date: datetime = None, before_date: datetime = None):
+        total = ArticleModel._get_list_count(after_date=after_date, before_date=before_date)
+        if total:
+            return total
+
+        api_logger = ApiLogger(f"[MONGODB] [ARTICLE COUNT] [ALL] : after_date = {after_date} and before_date = {before_date}")
+        if after_date or before_date:
+            match_created_at = ({}
+                                | ({'$gt': after_date} if after_date else {})
+                                | ({'$lt': before_date} if before_date else {}))
+            pipeline = [
+                {
+                    '$match': {'created_at': match_created_at}
+                }, {
+                    '$count': 'articles_count'
+                }
+            ]
+            result = ArticleManager.collection().aggregate(pipeline)
+            if result:
+                stats = list(result)
+                print(stats)
+                if stats:
+                    total = stats[0]['articles_count']
+                else:
+                    total = 0
+            else:
+                total = 0
+        else:
+            total = ArticleManager.collection().count_documents({})
+        api_logger.print_log()
+
+        ArticleModel._cache_articles_count(article_count=total, after_date=after_date, before_date=before_date)
+
         return total if (total and total > 0) else 0
 
     @classmethod
@@ -344,6 +426,20 @@ class ArticleTagsModel(DataBaseModel):
         return name_space.model('ArticleTagsModel', {
             'tags': fields.List(fields.String, description="List of tags"),
         })
+
+
+class ArticleUtility:
+
+    @staticmethod
+    def _cache_articles(articles: list[ArticleModel]):
+        for article in articles:
+            _ = ArticleModel.get(article_id=str(article.article_id))
+
+    @staticmethod
+    def cache_articles(articles: list[ArticleModel]):
+        thread = Thread(target=ArticleUtility._cache_articles, args=(articles,))
+        thread.daemon = True
+        thread.start()
 
 
 

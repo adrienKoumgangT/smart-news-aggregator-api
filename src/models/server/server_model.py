@@ -1,4 +1,5 @@
 import json
+from datetime import datetime
 from typing import Optional
 
 from bson import ObjectId
@@ -121,9 +122,31 @@ class ServerErrorLogModel(MongoDBBaseModel):
         return cls(**result)
 
     @staticmethod
-    def get_list_count():
-        api_logger = ApiLogger(f"[MONGODB] [SERVER ERROR LOG COUNT] [ALL] ")
-        total = ServerErrorLogManager.collection().count_documents({})
+    def get_list_count(after_date: datetime = None, before_date: datetime = None):
+        api_logger = ApiLogger(f"[MONGODB] [SERVER ERROR LOG COUNT] [ALL] : after_date = {after_date} and before_date = {before_date} ")
+        if after_date or before_date:
+            match_created_at = ({}
+                                | ({'$gt': after_date} if after_date else {})
+                                | ({'$lt': before_date} if before_date else {}))
+            pipeline = [
+                {
+                    '$match': {'created_at': match_created_at}
+                }, {
+                    '$count': 'errors_count'
+                }
+            ]
+            result = ServerErrorLogManager.collection().aggregate(pipeline)
+            if result:
+                stats = list(result)
+                print(stats)
+                if stats:
+                    total = stats[0]['errors_count']
+                else:
+                    total = 0
+            else:
+                total = 0
+        else:
+            total = ServerErrorLogManager.collection().count_documents({})
         api_logger.print_log()
         return total if (total and total > 0) else 0
 

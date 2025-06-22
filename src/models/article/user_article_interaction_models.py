@@ -221,9 +221,33 @@ class UserArticleInteractionModel(MongoDBBaseModel):
         return cls(**interaction)
 
     @staticmethod
-    def get_list_count():
-        api_logger = ApiLogger(f"[MONGODB] [USER ARTICLE INTERACTION COUNT] [ALL] ")
-        total = UserArticleInteractionManager.collection().count_documents({})
+    def get_list_count(after_date: datetime = None, before_date: datetime = None):
+        api_logger = ApiLogger(f"[MONGODB] [USER ARTICLE INTERACTION COUNT] [ALL] : after_date = {after_date} and before_date = {before_date} ")
+        if after_date or before_date:
+            match_created_at = ({}
+                                | ({'$gt': after_date} if after_date else {})
+                                | ({'$lt': before_date} if before_date else {}))
+            # print(match_created_at)
+            pipeline = [
+                {
+                    '$match': {'updated_at': match_created_at}
+                }, {
+                    '$count': 'interactions_count'
+                }
+            ]
+            print(pipeline)
+            result = UserArticleInteractionManager.collection().aggregate(pipeline)
+            if result:
+                stats = list(result)
+                print(stats)
+                if stats:
+                    total = stats[0]['interactions_count']
+                else:
+                    total = 0
+            else:
+                total = 0
+        else:
+            total = UserArticleInteractionManager.collection().count_documents({})
         api_logger.print_log()
         return total if (total and total > 0) else 0
 

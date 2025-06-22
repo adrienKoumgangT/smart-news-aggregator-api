@@ -5,7 +5,8 @@ from flask_restx import Namespace, Resource, fields
 
 from src.apps import token_required
 from src.lib.exception.exception_server import NotFoundException
-from src.models.article.article_model import ArticleModel
+from src.models.article.article_model import ArticleModel, ArticleUtility
+from src.models.article.comment_model import CommentModel
 from src.models.article.user_article_interaction_models import ArticleInteractionDashboard, UserArticleInteractionModel
 from src.models.model import Model
 from src.models.server.server_model import ServerErrorLogModel
@@ -35,6 +36,8 @@ class AdminArticles(Resource):
 
         total = ArticleModel.get_list_count()
         articles = ArticleModel.get_list(page=page, limit=limit)
+
+        ArticleUtility.cache_articles(articles=articles)
 
         return {
             "articles": [article.to_summary() for article in articles],
@@ -165,25 +168,52 @@ class AdminUser(Resource):
 
 
 @ns_admin.route('/dashboard/summary')
+@ns_admin.param('after_date', 'Date of consideration')
+@ns_admin.param('before_date', 'Date of consideration')
 class AdminDashboardSummary(Resource):
 
     @token_required
     @ns_admin.marshal_with(ns_admin.model('DashboardSummary', {
             'total_articles': fields.Integer(required=False),
+            'total_comments': fields.Integer(required=False),
             'total_users': fields.Integer(required=False),
             'total_interactions': fields.Integer(required=False),
+            'total_errors': fields.Integer(required=False),
         }), code=200)
     def get(self):
+        after_date_arg = request.args.get('after_date', default='', type=str)
+        before_date_arg = request.args.get('before_date', default='', type=str)
+
+        after_date = None
+        if after_date_arg:
+            try:
+                after_date_obj = datetime.datetime.strptime(after_date_arg, "%Y-%m-%d")
+                after_date = after_date_obj.replace(hour=0, minute=0, second=0, microsecond=0)
+            except Exception:
+                pass
+
+        before_date = None
+        if before_date_arg:
+            try:
+                before_date_obj = datetime.datetime.strptime(before_date_arg, "%Y-%m-%d")
+                before_date = before_date_obj.replace(hour=0, minute=0, second=0, microsecond=0)
+            except Exception:
+                pass
+
         user_token: UserToken = g.user
 
-        total_articles = ArticleModel.get_list_count()
-        total_users = User.get_list_count()
-        total_interactions = UserArticleInteractionModel.get_list_count()
+        total_articles = ArticleModel.get_list_count(after_date=after_date, before_date=before_date)
+        total_comments = CommentModel.get_list_count(after_date=after_date, before_date=before_date)
+        total_users = User.get_list_count(after_date=after_date, before_date=before_date)
+        total_interactions = UserArticleInteractionModel.get_list_count(after_date=after_date, before_date=before_date)
+        total_errors = ServerErrorLogModel.get_list_count(after_date=after_date, before_date=before_date)
 
         return {
             "total_articles": total_articles,
+            "total_comments": total_comments,
             "total_users": total_users,
             "total_interactions": total_interactions,
+            "total_errors": total_errors
         }
 
 @ns_admin.route('/dashboard/top-articles')
@@ -235,6 +265,9 @@ class AdminDashboardActivity(Resource):
     @token_required
     def get(self):
         user_token: UserToken = g.user
+
+
+# Manages errors
 
 
 @ns_admin.route('/dashboard/errors')
