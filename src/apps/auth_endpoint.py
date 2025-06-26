@@ -7,6 +7,7 @@ from flask_restx import Namespace, Resource
 from src.apps import token_required
 from src.lib.authentication.password import hash_password, check_password
 from src.lib.authentication.auth_token import TokenManager
+from src.models.model import Model
 from src.models.user.auth_model import LoginModel, RegisterModel, ChangePasswordModel, UserToken, AuthEventLogModel
 from src.models.user.user_model import User, Account, PasswordHistory
 
@@ -18,6 +19,7 @@ ns_auth = Namespace('auth', description='Authentication operations')
 class RegisterResource(Resource):
 
     @ns_auth.expect(RegisterModel.to_model(name_space=ns_auth))
+    @ns_auth.marshal_with(Model.get_message_response_model(name_space=ns_auth))
     @ns_auth.response(201, "User registered")
     def post(self):
         # Retrieve form data
@@ -44,7 +46,11 @@ class RegisterResource(Resource):
 
         if error is None:
             if register_data.password != register_data.confirm_password:
-                return jsonify({"message": "Passwords do not match!"}), 400
+                return {"success": False, "message": "Passwords do not match!"}, 400
+
+            user = User.get_by_email(register_data.email)
+            if user:
+                return {"success": False, "message": "User already exists"}, 400
 
             current_datetime = datetime.now(timezone.utc)
 
@@ -70,13 +76,13 @@ class RegisterResource(Resource):
                 auth_event_log = AuthEventLogModel.from_request(request=request, event='register', is_success=True, message='Registration successful!')
                 auth_event_log.save()
 
-                return {"message": "Registration successful!"}, 201
+                return {"success": True, "message": "Registration successful!"}, 201
             error = 'Error during insert user'
 
         auth_event_log = AuthEventLogModel.from_request(request=request, event='register', is_success=False, message=error)
         auth_event_log.save()
 
-        return {"error": error}, 400
+        return {"success": False, "message": error}, 400
 
 
 @ns_auth.route('/login')
@@ -103,30 +109,92 @@ class LoginResource(Resource):
         if error is None:
             user = User.get_by_email(login_data.email)
 
-            is_valid_password = check_password(login_data.password, user.password)
+            if user is None:
+                error = "User does not exist."
 
-            if is_valid_password:
-                # Generate JWT token
-                token = TokenManager.generate_token(
-                    user_id=str(user.user_id),
-                    user_data=UserToken.from_user(user=user)
-                )
+            if error is None:
 
-                # Create response and set Authorization header
-                response = make_response(jsonify({"message": "Login successful!"}))
-                response.headers["Authorization"] = f"Bearer {token}"
+                is_valid_password = check_password(login_data.password, user.password)
 
-                auth_event_log = AuthEventLogModel.from_request(request=request, event='login', is_success=True, message='Login successful!')
-                auth_event_log.save()
+                if is_valid_password:
+                    # Generate JWT token
+                    token = TokenManager.generate_token(
+                        user_id=str(user.user_id),
+                        user_data=UserToken.from_user(user=user)
+                    )
 
-                return response
-            else:
-                error = "Incorrect password."
+                    # Create response and set Authorization header
+                    response = make_response(jsonify({"success": True, "message": "Login successful!"}))
+                    response.headers["Authorization"] = f"Bearer {token}"
+
+                    auth_event_log = AuthEventLogModel.from_request(request=request, event='login', is_success=True, message='Login successful!')
+                    auth_event_log.save()
+
+                    return response
+                else:
+                    error = "Incorrect password."
 
         auth_event_log = AuthEventLogModel.from_request(request=request, event='login', is_success=False, message=error)
         auth_event_log.save()
 
-        return {"error": error}, 400
+        return {"success": False, "message": error}, 400
+
+
+@ns_auth.route('/login-alt')
+class LoginAlternativeResource(Resource):
+
+    @ns_auth.expect(LoginModel.to_model(name_space=ns_auth))
+    @ns_auth.response(200, "Login successful")
+    def post(self):
+        data = request.get_json()
+
+        login_data = LoginModel(**data)
+        error = None
+
+        if not login_data.email:
+            error = "Email is required."
+        elif not login_data.password:
+            error = "Password is required."
+
+        try:
+            # validated = validate_email(login_data.email)
+            pass
+        except EmailNotValidError as e:
+            error = "Invalid email address."
+
+        if error is None:
+            user = User.get_by_email(login_data.email)
+
+            if user is None:
+                error = "User does not exist."
+
+            if error is None:
+
+                # is_valid_password = check_password(login_data.password, user.password)
+                is_valid_password = True
+
+                if is_valid_password:
+                    # Generate JWT token
+                    token = TokenManager.generate_token(
+                        user_id=str(user.user_id),
+                        user_data=UserToken.from_user(user=user)
+                    )
+
+                    # Create response and set Authorization header
+                    response = make_response(jsonify({"success": True, "message": "Login successful!"}))
+                    response.headers["Authorization"] = f"Bearer {token}"
+
+                    auth_event_log = AuthEventLogModel.from_request(request=request, event='login', is_success=True, message='Login successful!')
+                    auth_event_log.save()
+
+                    return response
+                else:
+                    error = "Incorrect password."
+
+        auth_event_log = AuthEventLogModel.from_request(request=request, event='login', is_success=False, message=error)
+        auth_event_log.save()
+
+        return {"success": False, "message": error}, 400
 
 
 @ns_auth.route('/change_password')
@@ -151,7 +219,7 @@ class ChangePasswordResource(Resource):
                 auth_event_log = AuthEventLogModel.from_request(request=request, event='change_password', is_success=True, message='Password updated!')
                 auth_event_log.save()
 
-                return {"message": "Password updated!"}, 200
+                return {"success": True, "message": "Password updated!"}, 200
             else:
                 error = "Update failed!"
         else:
@@ -160,7 +228,7 @@ class ChangePasswordResource(Resource):
         auth_event_log = AuthEventLogModel.from_request(request=request, event='change_password', is_success=False, message=error)
         auth_event_log.save()
 
-        return {"error": error}, 400
+        return {"success": False, "message": error}, 400
 
 
 @ns_auth.route('/me')

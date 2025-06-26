@@ -118,6 +118,8 @@ class UserAuthor(MongoDBBaseModel):
 
 class UserMe(UserAuthor):
     email: str
+    phone: Optional[str] = None
+    cell: Optional[str] = None
     account: Account
     address: Optional[Address] = None
 
@@ -128,6 +130,8 @@ class UserMe(UserAuthor):
             'firstname': fields.String(required=True),
             'lastname': fields.String(required=True),
             'email': fields.String(required=True),
+            'phone': fields.String(required=False),
+            'cell': fields.String(required=False),
             'account': fields.Nested(Account.to_model(name_space)),
             'address': fields.Nested(Address.to_model(name_space)),
         })
@@ -293,6 +297,8 @@ class User(UserMe):
                 "$set": {
                     "firstname": self.firstname,
                     "lastname": self.lastname,
+                    "phone": self.phone if self.phone else "",
+                    "cell": self.cell if self.cell else "",
                     "address": self.address.to_json() if self.address else None,
                     "preferences": self.preferences,
                     "preferences_enable": self.preferences_enable,
@@ -300,7 +306,7 @@ class User(UserMe):
                 }
             }
         )
-        print(result)
+        # print(result)
         self._scache()
         api_logger.print_log(f"user updated: {result.modified_count > 0}")
         return result.modified_count > 0
@@ -383,7 +389,7 @@ class User(UserMe):
 
     @staticmethod
     def _cache_users_count(user_count: int, after_date: datetime = None, before_date: datetime = None):
-        api_logger = ApiLogger(f"[REDIS] [USER COUNT] [SET] : user_count0 {user_count}, after_date = {after_date} and before_date = {before_date}")
+        api_logger = ApiLogger(f"[REDIS] [USER COUNT] [SET] : user_count = {user_count}, after_date = {after_date} and before_date = {before_date}")
 
         user_count_key = UserManager.generate_user_count_key(after_date=after_date, before_date=before_date)
 
@@ -412,6 +418,7 @@ class User(UserMe):
         if user_count:
             api_logger.print_log()
             return int(user_count)
+
         api_logger.print_error("Cache missing")
         return None
 
@@ -444,7 +451,8 @@ class User(UserMe):
             else:
                 total = 0
         else:
-            total = UserManager.collection().count_documents({})
+            # total = UserManager.collection().count_documents({})
+            total = UserManager.collection().estimated_document_count({})
         api_logger.print_log()
 
         User._cache_users_count(user_count=total, after_date=after_date, before_date=before_date)

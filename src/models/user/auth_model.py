@@ -18,7 +18,7 @@ class RegisterModel(DataBaseModel):
     firstname: str
     lastname: str
     email: str
-    phone: Optional[str] = None
+    # phone: Optional[str] = None
     password: str
     confirm_password: str
 
@@ -28,7 +28,7 @@ class RegisterModel(DataBaseModel):
             'firstname': fields.String(required=True),
             'lastname': fields.String(required=True),
             'email': fields.String(required=True),
-            'phone': fields.String(required=False),
+            # 'phone': fields.String(required=False),
             'password': fields.String(required=True),
             'confirm_password': fields.String(required=True),
         })

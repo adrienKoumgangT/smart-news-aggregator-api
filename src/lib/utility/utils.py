@@ -1,6 +1,10 @@
 import datetime
+import random
 import time
 import uuid
+from typing import Optional
+
+from dateutil import parser
 from json import JSONEncoder
 
 from bson import ObjectId
@@ -61,6 +65,29 @@ def test_time_utils():
 
     utc_time = TimeUtils.convert_ms_to_utc(current_time_ms)
     print("UTC time:", utc_time)
+
+
+def convert_str_to_datetime(s: str | datetime.datetime) -> Optional[datetime.datetime]:
+    if s:
+        if isinstance(s, datetime.datetime):
+            return s
+        if isinstance(s, str):
+            try:
+                return datetime.datetime.fromisoformat(s)
+            except Exception | ValueError as e:
+                try:
+                    return parser.parse(s)
+                except ValueError as e:
+                    pass
+    return None
+
+
+# Generate a random datetime between start_date and end_date
+def random_datetime(start, end):
+    delta = end - start
+    random_seconds = random.randint(0, int(delta.total_seconds()))
+    return start + datetime.timedelta(seconds=random_seconds)
+
 
 
 if __name__ == '__main__':

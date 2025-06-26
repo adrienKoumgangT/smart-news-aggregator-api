@@ -32,6 +32,10 @@ class UserArticleInteractionManager:
         return mongodb_client[UserArticleInteractionManager.database_name][UserArticleInteractionManager.collection_name]
 
     @staticmethod
+    def init_database():
+        pass
+
+    @staticmethod
     def generate_user_article_interaction_key(user_id: str, article_id: str, comment_id: str = None):
         if comment_id:
             return f"user:{user_id}:article:{article_id}:comment:{comment_id}"
@@ -125,7 +129,7 @@ class UserArticleInteractionModel(MongoDBBaseModel):
     def save(self):
         api_logger = ApiLogger(f"[MONGODB] [USER ARTICLE INTERACTION] [SAVE] : {self.to_json()}")
         try:
-            print(f"article title : {self.article_title}")
+            # print(f"article title : {self.article_title}")
             if self.article_title is None:
                 from src.lib.exception.exception_server import NotFoundException
                 from src.models.article.article_model import ArticleModel
@@ -134,7 +138,7 @@ class UserArticleInteractionModel(MongoDBBaseModel):
                 if article is None:
                     raise NotFoundException("Article not found")
                 self.article_title = article.title
-                print(f"article title after update : {self.article_title}")
+                # print(f"article title after update : {self.article_title}")
 
             if self.interaction_id:
                 data = self.to_json()
@@ -247,7 +251,8 @@ class UserArticleInteractionModel(MongoDBBaseModel):
             else:
                 total = 0
         else:
-            total = UserArticleInteractionManager.collection().count_documents({})
+            # total = UserArticleInteractionManager.collection().count_documents({})
+            total = UserArticleInteractionManager.collection().estimated_document_count({})
         api_logger.print_log()
         return total if (total and total > 0) else 0
 

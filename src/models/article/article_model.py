@@ -15,6 +15,7 @@ from src.lib.database.nosql.document.mongodb.objectid import PydanticObjectId
 from src.lib.database.nosql.keyvalue.redis.redis_manager import RedisManagerInstance
 from src.lib.log.api_logger import ApiLogger
 from src.models import DataManagerBase, DataBaseModel
+from src.models.article.comment_model import CommentManager
 from src.models.article.user_article_interaction_models import ArticleInteractionStatus, ArticleInteractionStats
 
 
@@ -313,7 +314,8 @@ class ArticleModel(ArticleSummaryModel):
             else:
                 total = 0
         else:
-            total = ArticleManager.collection().count_documents({})
+            # total = ArticleManager.collection().count_documents({})
+            total = ArticleManager.collection().estimated_document_count({})
         api_logger.print_log()
 
         ArticleModel._cache_articles_count(article_count=total, after_date=after_date, before_date=before_date)
@@ -440,6 +442,81 @@ class ArticleUtility:
         thread = Thread(target=ArticleUtility._cache_articles, args=(articles,))
         thread.daemon = True
         thread.start()
+
+
+
+class ArticleCommentStats(DataBaseModel):
+    article_id: str
+    extern_api: str
+    title: Optional[str]
+    published_at: Optional[str]
+    source: Optional[ArticleSourceModel] = None
+    author: Optional[ArticleSourceModel] = None
+
+    comment_count: int
+
+    @staticmethod
+    def to_model(name_space: Namespace):
+        return name_space.model('ArticleModel', {
+            'article_id': fields.String(required=False),
+            'extern_api': fields.String(required=False),
+            'title': fields.String(required=False),
+            'author': fields.Nested(ArticleSourceModel.to_model(name_space)),
+            'source': fields.Nested(ArticleSourceModel.to_model(name_space)),
+            'published_at': fields.String(required=False),
+            'comment_count': fields.Integer(required=False),
+        })
+
+    @classmethod
+    def get_stats(cls, article_id: str, comment_id: str = None):
+        api_logger = ApiLogger(f"[MONGODB] [ARTICLE] [MOST COMMENT] : article={article_id} and comment={comment_id}")
+
+        pipeline = [
+            {
+                '$addFields': {
+                    'articleObjectId': { '$toObjectId': '$article_id' }
+                }
+            }, {
+                '$group': {
+                    '_id': '$articleObjectId',
+                    'comment_count': { '$sum': 1 }
+                }
+            }, {
+                '$sort': {
+                    'comment_count': -1
+                }
+            }, {
+                '$limit': 10
+            }, {
+                '$lookup': {
+                    'from': 'articles',
+                    'localField': '_id',
+                    'foreignField': '_id',
+                    'as': 'article'
+                }
+            }, {
+                '$unwind': '$article'
+            }, {
+                '$project': {
+                    'article_id': '$_id',
+                    'extern_api': '$article.extern_api',
+                    'title': '$article.title',
+                    'source': '$article.source',
+                    'author': '$article.author',
+                    'published_at': '$article.published_at',
+                    'comment_count': 1,
+                    '_id': 0
+                }
+            }
+        ]
+
+        stats = CommentManager.collection().aggregate(pipeline)
+        if stats is None:
+            api_logger.print_error("Error during retrieving statistics")
+            return []
+        api_logger.print_log()
+        stats_list = list(stats)
+        return [cls(**stat) for stat in stats_list]
 
 
 

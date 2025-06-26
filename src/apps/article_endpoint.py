@@ -117,7 +117,7 @@ class ArticleHistoryResource(Resource):
 class ArticleSummaryResource(Resource):
 
     @token_required
-    @ns_article.marshal_with(ArticleModel.to_model(name_space=ns_article))
+    @ns_article.marshal_with(ArticleWithInteractionModel.to_model(name_space=ns_article))
     def get(self, article_id):
         user_token: UserToken = g.user
 
@@ -208,12 +208,8 @@ class ArticleCommentResource(Resource):
         user_token: UserToken = g.user
 
         comments = CommentModel.last_comments(article_id=article_id, page=page, limit=limit)
-        comments_result = []
-        for comment in comments:
-            user_author = User.get(user_id=comment.user_id).to_author()
-            comments_result.append(comment.to_json() | {"author": (user_author.to_json() if user_author else None)})
 
-        return {'comments': comments_result}
+        return {'comments': [comment.to_json() for comment in comments]}
 
 
     @token_required
@@ -225,6 +221,10 @@ class ArticleCommentResource(Resource):
         data = request.get_json()
         data['article_id'] = article_id
         data['user_id'] = user_token.user_id
+
+        user = User.get(user_id=user_token.user_id)
+        data['author'] = user.to_author()
+
         comment = CommentModel(**data)
         comment.save()
 
