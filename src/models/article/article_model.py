@@ -1,55 +1,19 @@
-import json
-from datetime import datetime, timedelta
+from datetime import datetime
 from threading import Thread
 from typing import Optional, List
 
 from bson import ObjectId
 from flask_restx import fields, Namespace
 from pydantic import Field, field_serializer, BaseModel
-from pymongo.errors import DuplicateKeyError
 
-from src.lib.configuration import configuration
 from src.lib.database.nosql.document.mongodb.base import MongoDBBaseModel
-from src.lib.database.nosql.document.mongodb.mongodb_manager import mongodb_client
 from src.lib.database.nosql.document.mongodb.objectid import PydanticObjectId
-from src.lib.database.nosql.keyvalue.redis.redis_manager import RedisManagerInstance
 from src.lib.log.api_logger import ApiLogger
-from src.models import DataManagerBase, DataBaseModel
-from src.models.article.comment_model import CommentManager
+from src.models import DataBaseModel
+from src.models.article.comment_model import CommentModel
 from src.models.article.user_article_interaction_models import ArticleInteractionStatus, ArticleInteractionStats
+from src.models.user.auth_model import UserToken
 
-
-class ArticleManager(DataManagerBase):
-    database_name = configuration.get_configuration("mongodb.database")
-    collection_name = configuration.get_configuration("mongodb.collection.articles")
-
-    @staticmethod
-    def collection():
-        """
-        return MongoDBManagerInstance.get_instance().get_collection(
-            db_name=ArticleManager.database_name,
-            collection_name=ArticleManager.collection_name
-        )
-        """
-        return mongodb_client[ArticleManager.database_name][ArticleManager.collection_name]
-
-    @staticmethod
-    def init_database():
-        ArticleManager.collection().createIndex({ "tags": 1 })
-        ArticleManager.collection().createIndex({ "published_at": -1 })
-        ArticleManager.collection().create_index([("tags", 1), ("published_at", -1)])
-
-    @staticmethod
-    def generate_article_key(article_id: str):
-        return f"article:{article_id}"
-
-    @staticmethod
-    def generate_article_stats_key(article_id: str):
-        return f"article:{article_id}:stats"
-
-    @staticmethod
-    def generate_article_count_key(after_date: datetime = None, before_date: datetime = None):
-        return f"article:count:{after_date}:{before_date}"
 
 
 class ArticleSourceModel(BaseModel):
@@ -75,13 +39,30 @@ class ArticleSummaryModel(MongoDBBaseModel):
     source: Optional[ArticleSourceModel] = None
     image_url: Optional[str] = None
 
-    published_at: str
+    published_at: str | datetime
 
     tags: List[str]
 
     @field_serializer("article_id")
     def serialize_id(self, id_value: PydanticObjectId, _info):
         return str(id_value) if id_value else None
+
+    @classmethod
+    def _name(cls) -> str:
+        return "article"
+
+    @classmethod
+    def _id_name(cls) -> str:
+        return "article_id"
+
+    def _data_id(self) -> ObjectId:
+        return self.article_id
+
+    @classmethod
+    def init(cls):
+        cls.collection().createIndex({"tags": 1})
+        cls.collection().createIndex({"published_at": -1})
+        cls.collection().create_index([("tags", 1), ("published_at", -1)])
 
     @staticmethod
     def to_model(name_space: Namespace):
@@ -153,93 +134,25 @@ class ArticleModel(ArticleSummaryModel):
             exclude={"created_at", "updated_at"},
         )
 
-    def save(self):
-        api_logger = ApiLogger(f"[MONGODB] [ARTICLE] [SAVE] : {self.to_json()}")
-
-        article = ArticleManager.collection().find_one(
-            {
+    def save(self, user_token: UserToken):
+        article_check = {
                 'extern_api': self.extern_api,
                 'extern_id': self.extern_id,
                 'title': self.title
             }
-        )
+
+        api_logger = ApiLogger(f"[MONGODB] [ARTICLE] [CHECK ALREADY EXISTS] : {article_check}")
+
+        article = self.collection().find_one(article_check)
         if article:
             api_logger.print_error("Article already exists")
             return None
 
-        try:
-            result = ArticleManager.collection().insert_one(self.to_bson())
-        except DuplicateKeyError:
-            api_logger.print_error("Article already exists")
-            return None
-        self.article_id = result.inserted_id
-        api_logger.print_log(f"Article ID: {self.article_id}")
-
+        self.article_id = super().save(user_token)
         return self.article_id
 
-    def _scache(self):
-        article_key = ArticleManager.generate_article_key(article_id=str(self.article_id))
-
-        api_logger = ApiLogger(f"[REDIS] [ARTICLE] [SCACHE] : {article_key}")
-
-        RedisManagerInstance.get_instance().delete(key=article_key)
-
-        api_logger.print_log()
-
-    def _cache(self):
-        article_key = ArticleManager.generate_article_key(article_id=str(self.article_id))
-
-        api_logger = ApiLogger(f"[REDIS] [ARTICLE] [CACHE] : {article_key}")
-
-        article_json = json.dumps(self.to_json())
-        RedisManagerInstance.get_instance().set(key=article_key, value=article_json, ex=timedelta(minutes=30))
-
-        api_logger.print_log()
-
     @classmethod
-    def _get(cls, article_id: str):
-        article_key = ArticleManager.generate_article_key(article_id=article_id)
-
-        api_logger = ApiLogger(f"[REDIS] [ARTICLE] [GET] : {article_id}")
-        article_caching = RedisManagerInstance.get_instance().get(key=article_key)
-        if article_caching:
-            api_logger.print_log()
-            # article_json = json.loads(article_caching, object_hook=my_json_decoder)
-            article_json = json.loads(article_caching)
-            return cls(**article_json)
-        api_logger.print_error(message_error="Cache missing")
-        return None
-
-    @classmethod
-    def get(cls, article_id: str):
-        article = cls._get(article_id)
-        if article:
-            return article
-
-        api_logger = ApiLogger(f"[MONGODB] [ARTICLE] [GET] : {article_id}")
-
-        result = ArticleManager.collection().find_one({'_id': ObjectId(article_id)})
-        if result is None:
-            api_logger.print_error("Article does not exist")
-            return None
-        api_logger.print_log()
-
-        article = cls(**result)
-
-        article._cache()
-
-        return article
-
-    def delete(self):
-        api_logger = ApiLogger(f"[MONGODB] [ARTICLE] [DELETE] : {self.article_id}")
-        result = ArticleManager.collection().delete_one(
-            {"_id": ObjectId(self.article_id)}
-        )
-        api_logger.print_log(f"Article deleted: {result.deleted_count > 0}")
-        return result.deleted_count > 0
-
-    @staticmethod
-    def get_all_tags(search: str = None):
+    def get_all_tags(cls, user_token, search: str = None):
         api_logger = ApiLogger(f"[MONGODB] [ARTICLE TAGS] [GET ALL] : search = {search}")
         if search:
             pipeline = [
@@ -255,91 +168,15 @@ class ArticleModel(ArticleSummaryModel):
                 {"$project": {"_id": 0, "matchedTags": 1}}
             ]
 
-        result = list(ArticleManager.collection().aggregate(pipeline))
+        result = list(cls.collection().aggregate(pipeline))
         tags = result[0]['matchedTags'] if result else []
 
         api_logger.print_log()
         return tags
 
-    @staticmethod
-    def _cache_articles_count(article_count: int, after_date: datetime = None, before_date: datetime = None):
-        api_logger = ApiLogger(f"[REDIS] [ARTICLE COUNT] [SET] : after_date = {after_date} and before_date = {before_date}")
-
-        article_count_key = ArticleManager.generate_article_count_key(after_date=after_date, before_date=before_date)
-
-        RedisManagerInstance.get_instance().set(key=article_count_key, value=str(article_count), ex=timedelta(minutes=30))
-
-        api_logger.print_log()
-
-    @staticmethod
-    def _get_list_count(after_date: datetime = None, before_date: datetime = None):
-        api_logger = ApiLogger(f"[REDIS] [ARTICLE COUNT] [GET] : after_date = {after_date} and before_date = {before_date}")
-
-        article_count_key = ArticleManager.generate_article_count_key(after_date=after_date, before_date=before_date)
-
-        article_count = RedisManagerInstance.get_instance().get(key=article_count_key)
-
-        if article_count:
-            api_logger.print_log()
-            return int(article_count)
-        api_logger.print_error("Cache missing")
-        return None
-
-    @staticmethod
-    def get_list_count(after_date: datetime = None, before_date: datetime = None):
-        total = ArticleModel._get_list_count(after_date=after_date, before_date=before_date)
-        if total:
-            return total
-
-        api_logger = ApiLogger(f"[MONGODB] [ARTICLE COUNT] [ALL] : after_date = {after_date} and before_date = {before_date}")
-        if after_date or before_date:
-            match_created_at = ({}
-                                | ({'$gt': after_date} if after_date else {})
-                                | ({'$lt': before_date} if before_date else {}))
-            pipeline = [
-                {
-                    '$match': {'created_at': match_created_at}
-                }, {
-                    '$count': 'articles_count'
-                }
-            ]
-            result = ArticleManager.collection().aggregate(pipeline)
-            if result:
-                stats = list(result)
-                print(stats)
-                if stats:
-                    total = stats[0]['articles_count']
-                else:
-                    total = 0
-            else:
-                total = 0
-        else:
-            # total = ArticleManager.collection().count_documents({})
-            total = ArticleManager.collection().estimated_document_count({})
-        api_logger.print_log()
-
-        ArticleModel._cache_articles_count(article_count=total, after_date=after_date, before_date=before_date)
-
-        return total if (total and total > 0) else 0
 
     @classmethod
-    def get_list(cls, page: int = 1, limit: int = 10):
-        api_logger = ApiLogger(f"[MONGODB] [ARTICLE] [LIST] : page={page} and limit={limit}")
-
-        results = ArticleManager.collection().find(
-            filter={},
-            skip=limit * (page - 1),
-            limit=limit
-        )
-
-        api_logger.print_log()
-
-        if results:
-            return [cls(**result) for result in results]
-        return []
-
-    @staticmethod
-    def last_articles_count(preferences: list[str] = None):
+    def last_articles_count(cls, user_token: UserToken, preferences: list[str] = None):
         api_logger = ApiLogger(f"[MONGODB] [ARTICLE COUNT] [GET] : preferences={preferences}")
         if preferences:
             filter_search = {
@@ -349,13 +186,13 @@ class ArticleModel(ArticleSummaryModel):
             }
         else:
             filter_search = {}
-        total = ArticleManager.collection().count_documents(filter_search)
+        total = cls.collection().count_documents(filter_search)
         api_logger.print_log()
         return total if (total and total > 0) else 0
 
 
     @classmethod
-    def last_articles(cls, preferences: list[str] = None, page: int = 1, limit: int = 10):
+    def last_articles(cls, user_token: UserToken, preferences: list[str] = None, page: int = 1, limit: int = 10):
         api_logger = ApiLogger(f"[MONGODB] [ARTICLE LATEST] [GET] : page={page}, limit={limit} and preferences={preferences}")
         if preferences:
             filter_search = {
@@ -369,7 +206,7 @@ class ArticleModel(ArticleSummaryModel):
                         'published_at': -1
                     }.items())
 
-        results = ArticleManager.collection().find(
+        results = cls.collection().find(
             filter=filter_search,
             sort=sort,
             skip=limit * (page - 1),
@@ -381,6 +218,17 @@ class ArticleModel(ArticleSummaryModel):
         if results:
             return [cls(**result) for result in results]
         return []
+
+    @classmethod
+    def _cache_articles(cls, user_token: UserToken, articles: list):
+        for article in articles:
+            _ = cls.get(user_token, str(article.article_id))
+
+    @classmethod
+    def cache_articles(cls, user_token: UserToken, articles: list):
+        thread = Thread(target=cls._cache_articles, args=(user_token, articles,))
+        thread.daemon = True
+        thread.start()
 
 
 class ArticleWithInteractionModel(ArticleModel):
@@ -428,20 +276,6 @@ class ArticleTagsModel(DataBaseModel):
         return name_space.model('ArticleTagsModel', {
             'tags': fields.List(fields.String, description="List of tags"),
         })
-
-
-class ArticleUtility:
-
-    @staticmethod
-    def _cache_articles(articles: list[ArticleModel]):
-        for article in articles:
-            _ = ArticleModel.get(article_id=str(article.article_id))
-
-    @staticmethod
-    def cache_articles(articles: list[ArticleModel]):
-        thread = Thread(target=ArticleUtility._cache_articles, args=(articles,))
-        thread.daemon = True
-        thread.start()
 
 
 
@@ -510,7 +344,7 @@ class ArticleCommentStats(DataBaseModel):
             }
         ]
 
-        stats = CommentManager.collection().aggregate(pipeline)
+        stats = CommentModel.collection().aggregate(pipeline)
         if stats is None:
             api_logger.print_error("Error during retrieving statistics")
             return []

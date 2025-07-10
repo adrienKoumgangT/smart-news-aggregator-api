@@ -4,14 +4,14 @@ from datetime import datetime, timezone
 from typing import List, Optional
 
 from bson import ObjectId
-from pydantic import Field, BaseModel
+from pydantic import Field, BaseModel, field_serializer
 
 from src.lib.configuration import configuration
 from src.lib.database.nosql.document.mongodb.base import MongoDBBaseModel
-from src.lib.database.nosql.document.mongodb.mongodb_manager import MongoDBManagerInstance
 from src.lib.database.nosql.document.mongodb.objectid import PydanticObjectId
 from src.lib.log.api_logger import ApiLogger, EnumColor
 from src.models.article.article_model import ArticleModel
+from src.models.user.auth_model import UserToken
 
 
 class LogRequestManager:
@@ -41,15 +41,26 @@ class LogRequest(MongoDBBaseModel):
     fetched_count: Optional[int]
     file_result: Optional[str] = None
 
-    def save(self):
+    @field_serializer("log_request_id")
+    def serialize_id(self, id_value: PydanticObjectId, _info):
+        return str(id_value) if id_value else None
+
+    @classmethod
+    def _name(cls) -> str:
+        return "log_request"
+
+    @classmethod
+    def _id_name(cls) -> str:
+        return "log_request_id"
+
+    def _data_id(self) -> ObjectId:
+        return self.log_request_id
+
+    def save(self, user_token: UserToken):
         api_logger = ApiLogger(f"[MONGODB] [LOG REQUEST] [SAVE] save log request {self.source} : {self.url}")
 
-        log_requests_collection = MongoDBManagerInstance.get_instance().get_collection(
-            db_name=LogRequestManager.database_name,
-            collection_name=LogRequestManager.collection_name
-        )
         try:
-            result = log_requests_collection.insert_one(self.to_bson())
+            result = self.collection().insert_one(self.to_bson())
         except Exception as e:
             api_logger.print_error(message_error=str(e))
             return None
@@ -59,13 +70,10 @@ class LogRequest(MongoDBBaseModel):
 
     def update_result(self):
         api_logger = ApiLogger(f"[MONGODB] [LOG REQUEST] [UPDATE] [FILE RESULT] save log request {self.log_request_id} : {self.file_result}")
-        log_requests_collection = MongoDBManagerInstance.get_instance().get_collection(
-            db_name=LogRequestManager.database_name,
-            collection_name=LogRequestManager.collection_name
-        )
+
         current_datetime = datetime.now(timezone.utc)
 
-        result = log_requests_collection.update_one(
+        result = self.collection().update_one(
             {"_id": ObjectId(self.log_request_id)},
             {
                 "$set": {
@@ -123,6 +131,7 @@ class ExternApiBase:
 
     @staticmethod
     def log_request(
+            user_token: UserToken,
             api_name: str,
             url: str,
             headers: dict,
@@ -157,7 +166,7 @@ class ExternApiBase:
 
             file_result=file_path_result
         )
-        log_request.save()
+        log_request.save(user_token)
 
 
 

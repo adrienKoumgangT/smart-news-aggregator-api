@@ -8,7 +8,8 @@ from src.apps import token_required
 from src.lib.authentication.password import hash_password, check_password
 from src.lib.authentication.auth_token import TokenManager
 from src.models.model import Model
-from src.models.user.auth_model import LoginModel, RegisterModel, ChangePasswordModel, UserToken, AuthEventLogModel
+from src.models.user.auth_event_model import AuthEventLogModel
+from src.models.user.auth_model import LoginModel, RegisterModel, ChangePasswordModel, UserToken
 from src.models.user.user_model import User, Account, PasswordHistory
 
 
@@ -40,8 +41,8 @@ class RegisterResource(Resource):
             error = "Confirm password is required."
 
         try:
-            validated = validate_email(register_data.email)
-        except EmailNotValidError as e:
+            validate_email(register_data.email)
+        except EmailNotValidError:
             error = "Invalid email address."
 
         if error is None:
@@ -68,7 +69,8 @@ class RegisterResource(Resource):
                 created_at=current_datetime,
                 updated_at=current_datetime
             )
-            user.save()
+            user_token = UserToken(user_id='', firstname=user.firstname, lastname=user.lastname, email=user.email, role="user", status="active")
+            user.save(user_token)
 
             user = User.get_by_email(user.email)
 
@@ -102,8 +104,8 @@ class LoginResource(Resource):
             error = "Password is required."
 
         try:
-            validated = validate_email(login_data.email)
-        except EmailNotValidError as e:
+            validate_email(login_data.email)
+        except EmailNotValidError:
             error = "Invalid email address."
 
         if error is None:
@@ -113,11 +115,7 @@ class LoginResource(Resource):
                 error = "User does not exist."
 
             if error is None:
-
-                is_valid_password = check_password(login_data.password, user.password)
-
-                if is_valid_password:
-                    # Generate JWT token
+                if check_password(login_data.password, user.password):
                     token = TokenManager.generate_token(
                         user_id=str(user.user_id),
                         user_data=UserToken.from_user(user=user)
@@ -159,7 +157,7 @@ class LoginAlternativeResource(Resource):
         try:
             # validated = validate_email(login_data.email)
             pass
-        except EmailNotValidError as e:
+        except EmailNotValidError:
             error = "Invalid email address."
 
         if error is None:
@@ -206,15 +204,13 @@ class ChangePasswordResource(Resource):
 
         change_password_data = ChangePasswordModel(**data)
 
-        error = None
-
         user_token: UserToken = g.user
 
-        user = User.get(user_id=user_token.user_id)
+        user = User.get(user_token, user_token.user_id)
         is_valid_password = check_password(change_password_data.old_password, user.password)
 
         if is_valid_password:
-            is_update = User.update_password(user_token.user_id, change_password_data.password)
+            is_update = User.update_password(user_token, user_token.user_id, change_password_data.password)
             if is_update:
                 auth_event_log = AuthEventLogModel.from_request(request=request, event='change_password', is_success=True, message='Password updated!')
                 auth_event_log.save()

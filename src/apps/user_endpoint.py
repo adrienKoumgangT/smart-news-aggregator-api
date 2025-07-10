@@ -3,7 +3,6 @@ from flask_restx import Namespace, Resource
 
 from src.apps import token_required
 from src.lib.authentication.auth_token import UserToken
-from src.models.model import Model
 from src.models.user.user_model import User, UserMe, UserMePreferences, Address
 
 ns_user = Namespace('user', description='User related operations')
@@ -17,7 +16,7 @@ class UserMeResource(Resource):
     def get(self):
         user_token: UserToken = g.user
 
-        user_me = User.get(user_id=user_token.user_id).to_me()
+        user_me = User.get(user_token, user_token.user_id).to_me()
 
         return user_me.to_json()
 
@@ -42,7 +41,7 @@ class UserMeResource(Resource):
         user.lastname = lastname
         user.address = Address(**address) if address else None
 
-        is_updated = user.update_user()
+        is_updated = user.update_user(user_token)
         if is_updated:
             # TODO: force to update token with new name value
             return jsonify(user.to_me().to_json())
@@ -57,7 +56,7 @@ class UserMePreferenceResource(Resource):
     def get(self):
         user_token: UserToken = g.user
 
-        user = User.get(user_id=user_token.user_id)
+        user = User.get(user_token, user_token.user_id)
 
         if user is None:
             return jsonify({"message": "Invalid user"}), 400
@@ -81,7 +80,7 @@ class UserMePreferenceResource(Resource):
         user.preferences = preferences
         user.preferences_enable = preferences_enable
 
-        is_updated = user.update_user()
+        is_updated = user.update_user(user_token)
         if is_updated:
             return user.to_preferences_json()
         return jsonify({"message": "Error during update"}), 400

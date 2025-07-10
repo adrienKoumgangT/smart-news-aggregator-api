@@ -1,10 +1,10 @@
-from flask import g, jsonify, request
+from flask import g, request
 from flask_restx import Namespace, Resource
 
 from src.apps import token_required
 from src.lib.exception.exception_server import NotFoundException, UnauthorizedException
 from src.models.article.article_model import ArticleSummaryModel, ArticleModel, ArticleWithInteractionModel, \
-    ArticleTagsModel, ArticleUtility
+    ArticleTagsModel
 from src.models.article.comment_model import CommentModel
 from src.models.article.user_article_interaction_models import UserArticleInteractionModel, UserArticleInteraction, \
     ArticleInteractionStatus, ArticleInteractionType
@@ -23,7 +23,7 @@ class ArticleTags(Resource):
     def get(self):
         user_token: UserToken = g.user
 
-        tags = ArticleModel.get_all_tags()
+        tags = ArticleModel.get_all_tags(user_token)
 
         result = ArticleTagsModel(tags=tags)
 
@@ -38,7 +38,7 @@ class ArticleTags(Resource):
         data = request.get_json()
         search = data.get('search', None)
 
-        tags = ArticleModel.get_all_tags(search=search)
+        tags = ArticleModel.get_all_tags(user_token, search=search)
 
         result = ArticleTagsModel(tags=tags)
 
@@ -62,16 +62,16 @@ class LatestArticleResource(Resource):
 
         user_token: UserToken = g.user
 
-        user = User.get(user_id=user_token.user_id)
+        user = User.get(user_token, user_token.user_id)
 
         if user.preferences_enable and user.preferences:
-            total = ArticleModel.last_articles_count(preferences=user.preferences)
-            articles = ArticleModel.last_articles(preferences=user.preferences, page=page, limit=limit)
+            total = ArticleModel.last_articles_count(user_token, preferences=user.preferences)
+            articles = ArticleModel.last_articles(user_token, preferences=user.preferences, page=page, limit=limit)
         else:
-            total = ArticleModel.last_articles_count()
-            articles = ArticleModel.last_articles(page=page, limit=limit)
+            total = ArticleModel.last_articles_count(user_token)
+            articles = ArticleModel.last_articles(user_token, page=page, limit=limit)
 
-        ArticleUtility.cache_articles(articles=articles)
+        ArticleModel.cache_articles(user_token, articles=articles)
 
         return {
             "articles": [article.to_summary() for article in articles],
@@ -121,7 +121,7 @@ class ArticleSummaryResource(Resource):
     def get(self, article_id):
         user_token: UserToken = g.user
 
-        article = ArticleWithInteractionModel.get(article_id=article_id)
+        article = ArticleWithInteractionModel.get(user_token, article_id)
 
         if not article:
             raise NotFoundException("Article not found")
@@ -135,7 +135,7 @@ class ArticleSummaryResource(Resource):
             article.total_user_interaction = total_user_interaction
 
         UserArticleInteractionModel.update_interaction_read(
-            user_id=user_token.user_id,
+            user_token=user_token,
             article_id=article_id,
             article_title=article.title
         )
@@ -152,7 +152,7 @@ class ArticleSummaryResource(Resource):
     def get(self, article_id):
         user_token: UserToken = g.user
 
-        article = ArticleModel.get(article_id=article_id)
+        article = ArticleModel.get(user_token, article_id)
 
         if not article:
             raise NotFoundException("Article not found")
@@ -183,7 +183,7 @@ class ArticleInteractionResource(Resource):
 
         data = request.get_json()
         interaction = ArticleInteractionType(**data)
-        result = UserArticleInteractionModel.update_interaction(interaction=interaction, user_id=user_token.user_id, article_id=article_id)
+        result = UserArticleInteractionModel.update_interaction(user_token, interaction=interaction, article_id=article_id)
 
         if result:
             return {"success": True, "message": "Interaction updated"}
@@ -207,7 +207,7 @@ class ArticleCommentResource(Resource):
 
         user_token: UserToken = g.user
 
-        comments = CommentModel.last_comments(article_id=article_id, page=page, limit=limit)
+        comments = CommentModel.get_all(user_token, article_id=article_id, page=page, limit=limit)
 
         return {'comments': [comment.to_json() for comment in comments]}
 
@@ -222,11 +222,11 @@ class ArticleCommentResource(Resource):
         data['article_id'] = article_id
         data['user_id'] = user_token.user_id
 
-        user = User.get(user_id=user_token.user_id)
+        user = User.get(user_token, user_token.user_id)
         data['author'] = user.to_author()
 
         comment = CommentModel(**data)
-        comment.save()
+        comment.save(user_token)
 
         if comment.comment_id is None:
             raise NotFoundException("Error during save comment")
@@ -242,18 +242,18 @@ class ArticleCommentResource2(Resource):
     def get(self, article_id, comment_id):
         user_token: UserToken = g.user
 
-        article = ArticleModel.get(article_id=article_id)
+        article = ArticleModel.get(user_token, article_id)
 
         if article is None:
             raise NotFoundException("Article not found")
 
-        comment = CommentModel.get(comment_id=comment_id)
+        comment = CommentModel.get(user_token, comment_id)
 
         if comment is None:
             raise NotFoundException("Comment not found")
 
         UserArticleInteractionModel.update_interaction_read(
-            user_id=user_token.user_id,
+            user_token=user_token,
             article_id=article_id,
             article_title=article.title,
             comment_id=comment_id
@@ -267,7 +267,7 @@ class ArticleCommentResource2(Resource):
         if total_user_interaction:
             comment.total_user_interaction = total_user_interaction
 
-        user_author = UserAuthor.get(user_id=comment.user_id)
+        user_author = UserAuthor.get(user_token, comment.user_id)
 
         return comment.to_json() | {"author": (user_author.to_json() if user_author else None)}
 
@@ -276,12 +276,20 @@ class ArticleCommentResource2(Resource):
     def delete(self, article_id, comment_id):
         user_token: UserToken = g.user
 
-        comment = CommentModel.get(comment_id=comment_id)
+        article = ArticleModel.get(user_token, article_id)
+
+        if article is None:
+            raise NotFoundException("Article not found")
+
+        comment = CommentModel.get(user_token, comment_id)
 
         if comment is None:
             raise NotFoundException("Comment not found")
 
         if comment.user_id != user_token.user_id:
+            raise UnauthorizedException("You are not authorized to perform this action")
+
+        if comment.article_id != article_id:
             raise UnauthorizedException("You are not authorized to perform this action")
 
         comment.delete()
@@ -314,7 +322,7 @@ class ArticleInteractionResource(Resource):
 
         data = request.get_json()
         interaction = UserArticleInteraction(**data)
-        result = UserArticleInteractionModel.update_interaction(interaction=interaction, user_id=user_token.id, article_id=article_id, comment_id=comment_id)
+        result = UserArticleInteractionModel.update_interaction(user_token, interaction=interaction, article_id=article_id, comment_id=comment_id)
 
         if result:
             return {"success": True, "message": "Interaction updated"}

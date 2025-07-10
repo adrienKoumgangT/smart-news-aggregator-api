@@ -5,7 +5,7 @@ from flask_restx import Namespace, Resource, fields
 
 from src.apps import token_required
 from src.lib.exception.exception_server import NotFoundException
-from src.models.article.article_model import ArticleModel, ArticleUtility
+from src.models.article.article_model import ArticleModel
 from src.models.article.comment_model import CommentModel
 from src.models.article.user_article_interaction_models import ArticleInteractionDashboard, UserArticleInteractionModel
 from src.models.model import Model
@@ -37,7 +37,7 @@ class AdminArticles(Resource):
         total = ArticleModel.get_list_count()
         articles = ArticleModel.get_list(page=page, limit=limit)
 
-        ArticleUtility.cache_articles(articles=articles)
+        ArticleModel.cache_articles(user_token, articles=articles)
 
         return {
             "articles": [article.to_summary() for article in articles],
@@ -57,7 +57,7 @@ class AdminArticle(Resource):
     def get(self, article_id):
         user_token: UserToken = g.user
 
-        article = ArticleModel.get(article_id=article_id)
+        article = ArticleModel.get(user_token, article_id)
 
         if not article:
             raise NotFoundException("Article not found")
@@ -69,7 +69,7 @@ class AdminArticle(Resource):
     def delete(self, article_id):
         user_token: UserToken = g.user
 
-        article = ArticleModel.get(article_id=article_id)
+        article = ArticleModel.get(user_token, article_id)
 
         if not article:
             raise NotFoundException("Article not found")
@@ -98,7 +98,7 @@ class AdminUsers(Resource):
         user_token: UserToken = g.user
 
         total = User.get_list_count()
-        users = User.get_list(page=page, limit=limit)
+        users = User.get_all(user_token, page=page, limit=limit)
 
         users_me = [user.to_me() for user in users]
         print(users_me)
@@ -120,7 +120,7 @@ class AdminUser(Resource):
     def get(self, user_id):
         user_token: UserToken = g.user
 
-        user = User.get(user_id=user_id)
+        user = User.get(user_token, user_id)
         if not user:
             raise NotFoundException("User not found")
 
@@ -134,7 +134,7 @@ class AdminUser(Resource):
         data = request.get_json()
         user_me = UserMe(**data)
 
-        user = User.get(user_id=user_id)
+        user = User.get(user_token, user_id)
         if not user:
             raise NotFoundException("User not found")
 
@@ -154,7 +154,7 @@ class AdminUser(Resource):
     def delete(self, user_id):
         user_token: UserToken = g.user
 
-        user = User.get(user_id=user_id)
+        user = User.get(user_token, user_id)
 
         if not user:
             raise NotFoundException("User not found")
@@ -202,11 +202,11 @@ class AdminDashboardSummary(Resource):
 
         user_token: UserToken = g.user
 
-        total_articles = ArticleModel.get_list_count(after_date=after_date, before_date=before_date)
-        total_comments = CommentModel.get_list_count(after_date=after_date, before_date=before_date)
-        total_users = User.get_list_count(after_date=after_date, before_date=before_date)
-        total_interactions = UserArticleInteractionModel.get_list_count(after_date=after_date, before_date=before_date)
-        total_errors = ServerErrorLogModel.get_list_count(after_date=after_date, before_date=before_date)
+        total_articles = ArticleModel.get_all_count(user_token, after_date=after_date, before_date=before_date)
+        total_comments = CommentModel.get_all_count(user_token, after_date=after_date, before_date=before_date)
+        total_users = User.get_all_count(user_token, after_date=after_date, before_date=before_date)
+        total_interactions = UserArticleInteractionModel.get_all_count(user_token, after_date=after_date, before_date=before_date)
+        total_errors = ServerErrorLogModel.get_all_count(user_token, after_date=after_date, before_date=before_date)
 
         return {
             "total_articles": total_articles,
@@ -286,8 +286,8 @@ class AdminDashboardErrors(Resource):
 
         user_token: UserToken = g.user
 
-        total = ServerErrorLogModel.get_list_count()
-        errors = ServerErrorLogModel.get_list(page=page, limit=limit)
+        total = ServerErrorLogModel.get_all_count(user_token)
+        errors = ServerErrorLogModel.get_all(user_token, page=page, limit=limit)
 
         return {
             "errors": [err.to_json() for err in errors],
@@ -306,7 +306,7 @@ class AdminDashboardError(Resource):
     def get(self, server_error_log_id):
         user_token: UserToken = g.user
 
-        err = ServerErrorLogModel.get(server_error_log_id=server_error_log_id)
+        err = ServerErrorLogModel.get(user_token, server_error_log_id)
 
         if not err:
             raise NotFoundException("Error not found")
@@ -318,7 +318,7 @@ class AdminDashboardError(Resource):
     def delete(self, server_error_log_id):
         user_token: UserToken = g.user
 
-        err = ServerErrorLogModel.get(server_error_log_id=server_error_log_id)
+        err = ServerErrorLogModel.get(user_token, server_error_log_id)
 
         if not err:
             raise NotFoundException("Error not found")

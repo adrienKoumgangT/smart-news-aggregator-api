@@ -7,11 +7,11 @@ env_var = {
 
     "mongodb.uri": "mongodb://localhost:27017/",
     "mongodb.database": "smart-news-aggregator",
-    "mongodb.collection.users": "users",
-    "mongodb.collection.articles": "articles",
-    "mongodb.collection.user_article_interactions": "user-article-interactions",
-    "mongodb.collection.comments": "comments",
-    "mongodb.collection.log_requests": "log-requests",
+    "mongodb.collection.user": "users",
+    "mongodb.collection.article": "articles",
+    "mongodb.collection.interaction": "user-article-interactions",
+    "mongodb.collection.comment": "comments",
+    "mongodb.collection.log_request": "log-requests",
     "mongodb.collection.server_error_log": "server-error-log",
     "mongodb.collection.auth_event_log": "auth-event-log",
 

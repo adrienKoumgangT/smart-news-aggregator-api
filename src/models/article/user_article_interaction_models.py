@@ -4,42 +4,15 @@ from typing import Optional, Literal
 
 from bson import ObjectId
 from flask_restx import Namespace, fields
-from pydantic import Field, field_serializer, BaseModel
+from pydantic import Field, field_serializer
 from pymongo.errors import DuplicateKeyError
 
-from src.lib.configuration import configuration
 from src.lib.database.nosql.document.mongodb.base import MongoDBBaseModel
-from src.lib.database.nosql.document.mongodb.mongodb_manager import mongodb_client
 from src.lib.database.nosql.document.mongodb.objectid import PydanticObjectId
-from src.lib.database.nosql.keyvalue.redis.redis_manager import RedisManagerInstance
 from src.lib.log.api_logger import ApiLogger
 from src.models import DataBaseModel
+from src.models.user.auth_model import UserToken
 from src.models.user.user_model import UserAuthor
-
-
-class UserArticleInteractionManager:
-    database_name = configuration.get_configuration("mongodb.database")
-    collection_name = configuration.get_configuration("mongodb.collection.user_article_interactions")
-
-    @staticmethod
-    def collection():
-        """
-        return MongoDBManagerInstance.get_instance().get_collection(
-            db_name=UserArticleInteractionManager.database_name,
-            collection_name=UserArticleInteractionManager.collection_name
-        )
-        """
-        return mongodb_client[UserArticleInteractionManager.database_name][UserArticleInteractionManager.collection_name]
-
-    @staticmethod
-    def init_database():
-        pass
-
-    @staticmethod
-    def generate_user_article_interaction_key(user_id: str, article_id: str, comment_id: str = None):
-        if comment_id:
-            return f"user:{user_id}:article:{article_id}:comment:{comment_id}"
-        return f"user:{user_id}:article:{article_id}"
 
 
 class ArticleInteractionType(DataBaseModel):
@@ -77,6 +50,17 @@ class UserArticleInteractionModel(MongoDBBaseModel):
     @field_serializer("interaction_id")
     def serialize_id(self, id_value: PydanticObjectId, _info):
         return str(id_value) if id_value else None
+
+    @classmethod
+    def _name(cls) -> str:
+        return "interaction"
+
+    @classmethod
+    def _id_name(cls) -> str:
+        return "interaction_id"
+
+    def _data_id(self) -> ObjectId:
+        return self.interaction_id
 
     @staticmethod
     def to_model(name_space: Namespace):
@@ -126,7 +110,15 @@ class UserArticleInteractionModel(MongoDBBaseModel):
                 elif interaction.type == 'report':
                     self.report = interaction.value
 
-    def save(self):
+    @classmethod
+    def _cache_key(cls, user_token: UserToken, data_id: str, **kwargs) -> str:
+        article_id = kwargs.get("article_id")
+        comment_id = kwargs.get("comment_id")
+        if comment_id:
+            return f"user:{user_token.user_id}:article:{article_id}:comment:{comment_id}"
+        return f"user:{user_token.user_id}:article:{article_id}"
+
+    def save(self, user_token: UserToken):
         api_logger = ApiLogger(f"[MONGODB] [USER ARTICLE INTERACTION] [SAVE] : {self.to_json()}")
         try:
             # print(f"article title : {self.article_title}")
@@ -134,21 +126,21 @@ class UserArticleInteractionModel(MongoDBBaseModel):
                 from src.lib.exception.exception_server import NotFoundException
                 from src.models.article.article_model import ArticleModel
 
-                article = ArticleModel.get(article_id=self.article_id)
+                article = ArticleModel.get(user_token, self.article_id)
                 if article is None:
                     raise NotFoundException("Article not found")
                 self.article_title = article.title
-                # print(f"article title after update : {self.article_title}")
+                # print(f"article title after update: {self.article_title}")
 
             if self.interaction_id:
                 data = self.to_json()
                 del data["interaction_id"]
-                result = UserArticleInteractionManager.collection().update_one(
+                result = self.collection().update_one(
                     {"_id": ObjectId(self.interaction_id)},
                     {"$set": data}
                 )
             else:
-                result = UserArticleInteractionManager.collection().insert_one(self.to_bson())
+                result = self.collection().insert_one(self.to_bson())
         except DuplicateKeyError:
             api_logger.print_error("User already exists")
             return None
@@ -157,18 +149,10 @@ class UserArticleInteractionModel(MongoDBBaseModel):
         api_logger.print_log(f"Interaction ID: {self.interaction_id}")
         return self.interaction_id
 
-    @staticmethod
-    def scache_interaction(user_id: str, article_id: str, comment_id: str = None):
-        api_logger = ApiLogger(f"[REDIS] [USER ARTICLE INTERACTION] [SCACHE] : user={user_id}, article={article_id} and comment={comment_id}")
-
-        delete_result = RedisManagerInstance.get_instance().delete(key=UserArticleInteractionManager.generate_user_article_interaction_key(user_id=user_id, article_id=article_id, comment_id=comment_id))
-
-        api_logger.print_log(f"Delete result: {delete_result}")
-
     @classmethod
-    def update_interaction_read(cls, user_id: str, article_id: str, article_title: str, comment_id: str = None):
-        api_logger = ApiLogger(f"[MONGODB] [USER ARTICLE INTERACTION] [UPDATE] : user : {user_id}, article : {article_id} and comment={comment_id}")
-        filter_key = {"user_id": user_id, "article_id": article_id}
+    def update_interaction_read(cls, user_token: UserToken, article_id: str, article_title: str, comment_id: str = None):
+        api_logger = ApiLogger(f"[MONGODB] [USER ARTICLE INTERACTION] [UPDATE] : user={user_token.user_id}, article={article_id} and comment={comment_id}")
+        filter_key = {"user_id": user_token.user_id, "article_id": article_id}
         filter_key |= {"comment_id": comment_id} if comment_id else {}
         datetime_operation = datetime.now(timezone.utc)
         data_on_insert = {
@@ -178,7 +162,7 @@ class UserArticleInteractionModel(MongoDBBaseModel):
             "shared": False,
             "saved": False
         }
-        result = UserArticleInteractionManager.collection().update_one(
+        result = cls.collection().update_one(
             filter=filter_key,
             update={
                 "$set": {
@@ -192,74 +176,30 @@ class UserArticleInteractionModel(MongoDBBaseModel):
             },
             upsert=True
         )
-        cls.scache_interaction(user_id=user_id, article_id=article_id)
+        cls._scache(user_token, article_id)
         api_logger.print_log(f"Update result: {result.modified_count > 0}")
 
     @classmethod
-    def update_interaction(cls, interaction: UserArticleInteraction | ArticleInteractionType, user_id: str, article_id: str, comment_id: str = None):
-
-
-        api_logger = ApiLogger(f"[MONGODB] [USER ARTICLE INTERACTION] [UPDATE] : user={user_id}, article={article_id}, comment={comment_id} and interaction={interaction}")
-        filter_key = {"user_id": user_id, "article_id": article_id}
+    def update_interaction(cls, user_token: UserToken, interaction: UserArticleInteraction | ArticleInteractionType, article_id: str, comment_id: str = None):
+        api_logger = ApiLogger(f"[MONGODB] [USER ARTICLE INTERACTION] [UPDATE] : user={user_token.user_id}, article={article_id}, comment={comment_id} and interaction={interaction}")
+        filter_key = {"user_id": user_token.user_id, "article_id": article_id}
         filter_key |= {"comment_id": comment_id} if comment_id else {}
 
-        preview_interaction = cls.get_by_user_article(user_id=user_id, article_id=article_id, comment_id=comment_id)
+        preview_interaction = cls.get_by_user_article(user_id=user_token.user_id, article_id=article_id, comment_id=comment_id)
         if preview_interaction is None:
             level_interaction = "comment" if comment_id else "article"
-            preview_interaction = cls(_id=None, level_interaction=level_interaction, user_id=user_id, article_id=article_id, comment_id=comment_id)
+            preview_interaction = cls(_id=None, level_interaction=level_interaction, user_id=user_token.user_id, article_id=article_id, comment_id=comment_id)
         preview_interaction.update(interaction)
-        b = preview_interaction.save()
+        b = preview_interaction.save(user_token)
 
         api_logger.print_log()
 
         return not b is None
 
     @classmethod
-    def get(cls, interaction_id: str):
-        api_logger = ApiLogger(f"[MONGODB] [USER ARTICLE INTERACTION] [GET] : {interaction_id}")
-        interaction = UserArticleInteractionManager.collection().find_one({"_id": ObjectId(interaction_id)})
-        if interaction is None:
-            api_logger.print_error("User Article Interaction does not exist")
-            return None
-        api_logger.print_log()
-        return cls(**interaction)
-
-    @staticmethod
-    def get_list_count(after_date: datetime = None, before_date: datetime = None):
-        api_logger = ApiLogger(f"[MONGODB] [USER ARTICLE INTERACTION COUNT] [ALL] : after_date = {after_date} and before_date = {before_date} ")
-        if after_date or before_date:
-            match_created_at = ({}
-                                | ({'$gt': after_date} if after_date else {})
-                                | ({'$lt': before_date} if before_date else {}))
-            # print(match_created_at)
-            pipeline = [
-                {
-                    '$match': {'updated_at': match_created_at}
-                }, {
-                    '$count': 'interactions_count'
-                }
-            ]
-            print(pipeline)
-            result = UserArticleInteractionManager.collection().aggregate(pipeline)
-            if result:
-                stats = list(result)
-                print(stats)
-                if stats:
-                    total = stats[0]['interactions_count']
-                else:
-                    total = 0
-            else:
-                total = 0
-        else:
-            # total = UserArticleInteractionManager.collection().count_documents({})
-            total = UserArticleInteractionManager.collection().estimated_document_count({})
-        api_logger.print_log()
-        return total if (total and total > 0) else 0
-
-    @classmethod
     def get_by_user_article(cls, user_id: str, article_id: str, comment_id: str = None):
         api_logger = ApiLogger(f"[MONGODB] [USER ARTICLE INTERACTION] [GET] [BY USER ARTICLE] : user={user_id}, article={article_id} and comment={comment_id}")
-        interaction = UserArticleInteractionManager.collection().find_one(
+        interaction = cls.collection().find_one(
             {
                 "user_id": user_id,
                 "article_id": article_id,
@@ -272,8 +212,8 @@ class UserArticleInteractionModel(MongoDBBaseModel):
         api_logger.print_log()
         return cls(**interaction)
 
-    @staticmethod
-    def get_stats(article_id: str, comment_id: str = None):
+    @classmethod
+    def get_stats(cls, article_id: str, comment_id: str = None):
         api_logger = ApiLogger(f"[MONGODB] [USER ARTICLE INTERACTION] [GET STAT] : article={article_id} and comment={comment_id}")
 
         match = {"article_id": article_id} | ({"comment_id": comment_id} if comment_id else {})
@@ -290,7 +230,7 @@ class UserArticleInteractionModel(MongoDBBaseModel):
             }
         ]
 
-        stats = UserArticleInteractionManager.collection().aggregate(pipeline)
+        stats = cls.collection().aggregate(pipeline)
         if stats is None:
             api_logger.print_error("Error during retrieving statistics")
             return ArticleInteractionStats()
@@ -305,10 +245,10 @@ class UserArticleInteractionModel(MongoDBBaseModel):
             )
         return ArticleInteractionStats()
 
-    @staticmethod
-    def read_history_count(user_id: str):
+    @classmethod
+    def read_history_count(cls, user_id: str):
         api_logger = ApiLogger(f"[MONGODB] [USER ARTICLE INTERACTION] [GET] [HISTORY] : user={user_id}")
-        total =  UserArticleInteractionManager.collection().count_documents({"user_id": user_id, "read_at": {"$exists": True}})
+        total =  cls.collection().count_documents({"user_id": user_id, "read_at": {"$exists": True}})
         api_logger.print_log()
         return total if (total and total > 0) else 0
 
@@ -316,7 +256,7 @@ class UserArticleInteractionModel(MongoDBBaseModel):
     def get_read_history(cls, user_id: str, page: int = 1, limit: int = 5):
         api_logger = ApiLogger(f"[MONGODB] [USER ARTICLE INTERACTION] [GET] [HISTORY] : user={user_id}, page={page} and limit={limit}")
 
-        result = UserArticleInteractionManager.collection().find(
+        result = cls.collection().find(
             {"user_id": user_id, "read_at": {"$exists": True}},
             # {"_id": 0, "article_id": 1, "read_at": 1, "time_spent": 1}
         ).sort("read_at", -1).skip(limit * (page-1)).limit(limit)
@@ -433,7 +373,6 @@ class ArticleInteractionDashboard(DataBaseModel):
     @classmethod
     def get_most_interacted_articles(cls, date_check = None):
         api_logger = ApiLogger(f"[MONGODB] [USER ARTICLE INTERACTION] [DASHBOARD] [MOST INTERACTED ARTICLES] ")
-        # date_check = datetime(2025, 6, 21, 0, 0, 0, tzinfo=timezone.utc)
 
         if date_check:
             pipeline = [
@@ -542,7 +481,7 @@ class ArticleInteractionDashboard(DataBaseModel):
                 }
             ]
 
-        stats = UserArticleInteractionManager.collection().aggregate(pipeline)
+        stats = UserArticleInteractionModel.collection().aggregate(pipeline)
         if stats is None:
             api_logger.print_error("Error during retrieving statistics")
 
