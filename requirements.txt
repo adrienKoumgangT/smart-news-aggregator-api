@@ -1,6 +1,7 @@
 Flask~=3.1.1
 pymongo~=4.13.0
-pydantic~=2.11.5
+pydantic
+pydantic_core
 bcrypt~=4.3.0
 pyjwt~=2.10.1
 requests~=2.32.3
@@ -9,6 +10,7 @@ cryptography~=45.0.3
 flask-cors~=6.0.0
 redis[hiredis]~=6.2.0
 Faker~=37.4.0
-pydantic_core~=2.34.1
-email_validator~=2.2.0
 python-dateutil~=2.9.0.post0
+email_validator~=2.2.0
+python-dotenv~=1.1.1
+gunicorn

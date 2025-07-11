@@ -1,98 +1,102 @@
 import os
+from dataclasses import dataclass, field
+from typing import TypeVar, Optional, Type, List
 
-env_var = {
-    "prod": False,
-
-    "debug": True,
-
-    "mongodb.uri": "mongodb://localhost:27017/",
-    "mongodb.database": "smart-news-aggregator",
-    "mongodb.collection.user": "users",
-    "mongodb.collection.article": "articles",
-    "mongodb.collection.interaction": "user-article-interactions",
-    "mongodb.collection.comment": "comments",
-    "mongodb.collection.log_request": "log-requests",
-    "mongodb.collection.server_error_log": "server-error-log",
-    "mongodb.collection.auth_event_log": "auth-event-log",
-
-    "redis.uri": "redis://localhost:6379",
-
-    "externapi.mediastack.enable": True,
-    "externapi.mediastack.access_key": "",
-    "externapi.mediastack.max_request": 10,
-
-    "externapi.currentsapi.enable": True,
-    "externapi.currentsapi.api_key": "",
-    "externapi.currentsapi.max_request": 10,
-
-    "externapi.gnews.enable": False,
-    "externapi.gnews.api_key": "",
-    "externapi.gnews.max_request": 10,
-
-    "externapi.marketaux.enable": True,
-    "externapi.marketaux.api_key": "",
-    "externapi.marketaux.max_request": 10,
-
-    "externapi.nytimes.enable": True,
-    "externapi.nytimes.api_key": "",
-    "externapi.nytimes.max_request": 10,
-
-    "externapi.newsapi.enable": True,
-    "externapi.newsapi.api_key": "",
-    "externapi.newsapi.max_request": 100,
-
-    "externapi.newsdata.enable": True,
-    "externapi.newsdata.api_key": "",
-    "externapi.newsdata.max_request": 100,
-
-    "externapi.spaceflightnewsapi.enable": True,
-    "externapi.spaceflightnewsapi.api_key": "",
-    "externapi.spaceflightnewsapi.max_request": 100,
-
-    "externapi.theguardian.enable": True,
-    "externapi.theguardian.api_key": "",
-    "externapi.theguardian.max_request": 100,
-
-}
-
-# eu-central-1
+from dotenv import load_dotenv
 
 
-def is_prod() -> bool:
+def to_env_var_name(key: str) -> str:
+    return key.strip().replace(".", "_").replace("-", "_").upper()
+
+T = TypeVar("T")
+
+def get_env_var(name: str, default: Optional[T] = None, var_type: Type[T] = str, delimiter: str = ","):
+    var_name = to_env_var_name(name)
+    value = os.getenv(var_name, default)
+
+    print(f"{var_name} = {value}")
+
+    if value is None:
+        return default
+
     try:
-        return bool(os.environ.get("prod", env_var["prod"]))
-    except KeyError as e:
-        print(e)
-        return False
+        if var_type == bool:
+            return str(value).strip().lower() in ("true", "1", "yes", "on")
+        elif var_type == int:
+            return int(value)
+        elif var_type == float:
+            return float(value)
+        elif var_type == list:
+            return [item.strip() for item in value.split(delimiter)]
+        elif var_type == str:
+            return str(value)
+        else:
+            raise ValueError(f"Unsupported var_type: {var_type}")
     except Exception as e:
-        print(e)
-        raise e
+        raise ValueError(f"Failed to parse env var '{name}' ('{var_name}') as {var_type.__name__}: {e}")
 
 
-def is_debug() -> bool:
-    try:
-        return bool(os.environ.get("debug", env_var["debug"]))
-    except KeyError as e:
-        print(e)
-        return True
-    except Exception as e:
-        print(e)
-        raise e
+@dataclass
+class MongoConfig:
+    host: str = field(default_factory=lambda: get_env_var("mongodb.host", "localhost"))
+    port: int = field(default_factory=lambda: get_env_var("mongodb.port", 27017, int))
+    username: str = field(default_factory=lambda: get_env_var("mongodb.username", ""))
+    password: str = field(default_factory=lambda: get_env_var("mongodb.password", ""))
+
+    uri: str = field(default_factory=lambda: get_env_var("mongodb.uri", "mongodb://localhost:27017/"))
+
+    database: str = field(default_factory=lambda: get_env_var("mongodb.database", "smart-news-aggregator"))
+
+@dataclass
+class RedisConfig:
+    host: str = field(default_factory=lambda: get_env_var("redis.host", "localhost"))
+    port: int = field(default_factory=lambda: get_env_var("redis.port", 6379, int))
+    db: int = field(default_factory=lambda: get_env_var("redis.db", 0, int))
+
+    uri: str = field(default_factory=lambda: get_env_var("redis.uri", "redis://localhost:6379"))
+
+@dataclass
+class ExternAPIConfig:
+    enable: bool = field(default_factory=lambda: get_env_var("enable", False, bool))
+    access_key: str = field(default_factory=lambda: get_env_var("access_key", ""))
+    max_request: int = field(default_factory=lambda: get_env_var("max_request", 0, int))
+
+@dataclass
+class Config:
+    prod: bool = field(default_factory=lambda: get_env_var("prod", False, bool))
+    debug: bool = field(default_factory=lambda: get_env_var("debug", False, bool))
+    log: bool = field(default_factory=lambda: get_env_var("log", True, bool))
+    port: int = field(default_factory=lambda: get_env_var("port", 5000, int))
+
+    allowed_hosts: List[str] = field(default_factory=lambda: get_env_var("allowed.hosts", "localhost,127.0.0.1", list))
+    swagger_allowed_hosts: List[str] = field(default_factory=lambda: get_env_var("swagger.allowed.hosts", "127.0.0.1/32", list))
+
+    mongo: MongoConfig = field(default_factory=MongoConfig)
+    redis: RedisConfig = field(default_factory=RedisConfig)
 
 
-def get_configuration(key):
-    key_conf = key
-    if is_prod():
-        key_conf += ".prod"
-    try:
-        return os.environ.get(key_conf, env_var[key_conf])
-    except KeyError as e:
-        print(e)
-        try:
-            if is_prod():
-                return os.environ.get(key, env_var[key])
-            return None
-        except KeyError as e2:
-            print(e2)
-            return None
+
+class ConfigManager:
+    def __init__(self):
+        self._config = None
+        self.reload()
+
+    def reload(self):
+        # Reload .env
+        env_file = os.getenv("FLASK_ENV_FILE", ".env.dev")
+        print(f"env_file: {env_file}")
+        env_path = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), '..', env_file)
+        print(f"env_path: {env_path}")
+        load_dotenv(dotenv_path=env_path, verbose=True, override=True)
+
+        # Rebuild the config dataclass
+        self._config = Config()
+
+    def get(self) -> Config:
+        return self._config
+
+
+config_manager = ConfigManager()
+config = config_manager.get()
+
 

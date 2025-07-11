@@ -15,7 +15,7 @@ def register_error_handlers(api: Api):
             exception_message=error.message
         )
         server_error_log.save()
-        return {"error": "unsafe error"}, 400
+        return {"error": "unsafe error", "message": "Contact administration"}, 400
 
     @api.errorhandler(UnauthorizedException)
     def handle_unauthorized_exception(error: UnauthorizedException):
@@ -25,5 +25,6 @@ def register_error_handlers(api: Api):
             exception_message=error.message
         )
         server_error_log.save()
-        return {"error": "unauthorized error"}, 403
+        return {"error": "unauthorized error", "message": f"You are not authorized to perform this operation: {error}"}, 403
+
 

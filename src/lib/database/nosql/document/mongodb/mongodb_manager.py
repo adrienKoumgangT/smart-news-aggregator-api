@@ -3,21 +3,20 @@ from typing import Optional
 from pymongo import MongoClient
 
 from src.lib.configuration import configuration
+from src.lib.configuration.configuration import config
 
 
 class MongoDBManager:
 
     @staticmethod
     def database_name() -> str:
-        return configuration.get_configuration("mongodb.database")
+        return config.mongo.database
 
     @staticmethod
     def collection_name(name):
-        return configuration.get_configuration(f"mongodb.collection.{name}")
+        return configuration.get_env_var(f"mongodb.collection.{name}")
 
 
-
-mongodb_uri = configuration.get_configuration("mongodb.uri")
 mongodb_client = MongoClient(
-    mongodb_uri if mongodb_uri else "mongodb://localhost:27017/"
+    config.mongo.uri if config.mongo.uri else "mongodb://localhost:27017/"
 )

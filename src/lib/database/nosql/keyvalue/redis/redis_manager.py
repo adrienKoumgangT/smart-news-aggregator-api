@@ -4,7 +4,7 @@ from typing import Optional, Any
 
 import redis
 
-from src.lib.configuration import configuration
+from src.lib.configuration.configuration import config
 
 
 class RedisManager:
@@ -69,7 +69,7 @@ class RedisManagerInstance:
     def init_database():
         if RedisManagerInstance.instance is None:
             RedisManagerInstance.instance = RedisManager(
-                redis_url=configuration.get_configuration("redis.uri")
+                redis_url=config.redis.uri
             )
 
     @staticmethod

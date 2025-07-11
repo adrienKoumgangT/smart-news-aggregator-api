@@ -6,17 +6,12 @@ from typing import List, Optional
 from bson import ObjectId
 from pydantic import Field, BaseModel, field_serializer
 
-from src.lib.configuration import configuration
 from src.lib.database.nosql.document.mongodb.base import MongoDBBaseModel
 from src.lib.database.nosql.document.mongodb.objectid import PydanticObjectId
 from src.lib.log.api_logger import ApiLogger, EnumColor
 from src.models.article.article_model import ArticleModel
 from src.models.user.auth_model import UserToken
 
-
-class LogRequestManager:
-    database_name = configuration.get_configuration("mongodb.database")
-    collection_name = configuration.get_configuration("mongodb.collection.log_requests")
 
 class LogRequestRequest(BaseModel):
     url: str

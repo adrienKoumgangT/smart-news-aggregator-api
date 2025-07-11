@@ -1,4 +1,6 @@
-from flask import Flask, Blueprint, render_template_string, request, Response
+import ipaddress
+
+from flask import Flask, Blueprint, render_template_string, request, abort
 from flask_cors import CORS
 from flask_restx import Api
 
@@ -7,13 +9,18 @@ from src.apps.article_endpoint import ns_article
 from src.apps.auth_endpoint import ns_auth
 from src.apps.test_endpoint import ns_test
 from src.apps.user_endpoint import ns_user
+from src.lib.configuration.configuration import get_env_var, config
 from src.lib.exception.exception_handler import register_error_handlers
+
+
+ALLOWED_NETWORKS = config.swagger_allowed_hosts
 
 
 def create_app():
     app = Flask(__name__)
 
     app.config['MAX_CONTENT_LENGTH'] = 10 * 1024 * 1024 # 100MB
+    app.config["DEBUG"] = get_env_var("DEBUG", default=False, var_type=bool)
 
     CORS(
         app,
@@ -55,6 +62,18 @@ def create_app():
     def close_db(exception=None):
         MongoDBManagerInstance.shutdown()
     """
+
+
+    @app.before_request
+    def restrict_swagger_access():
+        if request.path.startswith("/docs") or request.path.startswith("/swagger"):
+            if config.prod:
+                allowed_networks = [ipaddress.ip_network(network) for network in ALLOWED_NETWORKS]
+                print(f"allowed networks: {ALLOWED_NETWORKS}")
+                print(f"is prod: {config.prod}")
+                client_ip = ipaddress.ip_address(request.remote_addr)
+                if not any(client_ip in net for net in allowed_networks):
+                    abort(403)
 
 
     @app.route("/")
@@ -123,8 +142,7 @@ def create_app():
 
     return app
 
+application = create_app()
 
 if __name__ == "__main__":
-    application = create_app()
-
     application.run(host='0.0.0.0', port=5000, debug=True)

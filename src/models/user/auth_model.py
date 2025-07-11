@@ -81,20 +81,6 @@ class UserToken(DataBaseModel):
             'role': fields.String(required=True),
         })
 
-class AuthEventLogManager:
-    database_name = configuration.get_configuration("mongodb.database")
-    collection_name = configuration.get_configuration("mongodb.collection.auth_event_log")
-
-    @staticmethod
-    def collection():
-        """
-        return MongoDBManagerInstance.get_instance().get_collection(
-            db_name=AuthEventLogManager.database_name,
-            collection_name=AuthEventLogManager.collection_name
-        )
-        """
-        return mongodb_client[AuthEventLogManager.database_name][AuthEventLogManager.collection_name]
-
 
 
 

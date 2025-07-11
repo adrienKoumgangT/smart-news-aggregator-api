@@ -1,9 +1,10 @@
 import datetime
 
 from flask import g, request, jsonify
-from flask_restx import Namespace, Resource, fields
+from flask_restx import Namespace, Resource, fields, Api
 
 from src.apps import token_required
+from src.lib.configuration.configuration import config_manager
 from src.lib.exception.exception_server import NotFoundException
 from src.models.article.article_model import ArticleModel
 from src.models.article.comment_model import CommentModel
@@ -324,5 +325,20 @@ class AdminDashboardError(Resource):
             raise NotFoundException("Error not found")
 
         return {"success": True, "message": "Error deleted"}
+
+
+@ns_admin.route('/reload-config')
+class AdminApiResource(Resource):
+
+    @token_required
+    @ns_admin.marshal_with(Model.get_message_response_model(name_space=ns_admin), code=200)
+    def get(self):
+        user_token: UserToken = g.user
+
+        config_manager.reload()
+
+        return {"success": True, "message": "Reloaded"}
+
+
 
 

@@ -16,7 +16,7 @@ class NewsApi(ExternApiBase):
 
     def __init__(self, api_key: Optional[str] = None):
         super().__init__(api_key)
-        self.api_key = api_key if api_key else configuration.get_configuration("externapi.newsapi.api_key")
+        self.api_key = api_key if api_key else configuration.get_env_var("externapi.newsapi.api_key")
 
     def fetch_news(self) -> List[dict]:
         """

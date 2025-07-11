@@ -23,7 +23,7 @@ def read_public_key(public_key_path: str = 'public_key.pem') -> bytes:
         print(f"Reading public key from: {path}")
         with open(path, "rb") as public_key_file:
             return public_key_file.read()
-    return configuration.get_configuration("jwts.public.key")
+    return configuration.get_env_var("jwts.public.key")
 
 
 def read_private_key(private_key_path: str = 'private_key.pem') -> bytes:
@@ -32,7 +32,7 @@ def read_private_key(private_key_path: str = 'private_key.pem') -> bytes:
         print(f"Reading private key from: {path}")
         with open(path, "rb") as private_key_file:
             return private_key_file.read()
-    return configuration.get_configuration("jwts.private.key")
+    return configuration.get_env_var("jwts.private.key")
 
 
 class TokenManager:

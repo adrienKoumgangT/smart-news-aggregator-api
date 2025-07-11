@@ -1,5 +1,6 @@
 from typing import Optional
 
+from bson import ObjectId
 from flask import Request
 from pydantic import Field, field_serializer
 
@@ -7,7 +8,7 @@ from src.lib.database.nosql.document.mongodb.base import MongoDBBaseModel
 from src.lib.database.nosql.document.mongodb.objectid import PydanticObjectId
 from src.lib.log.api_logger import ApiLogger
 from src.lib.utility.utils_server import RequestData
-from src.models.user.auth_model import UserToken, AuthEventLogManager
+from src.models.user.auth_model import UserToken
 
 
 class AuthEventLogModel(MongoDBBaseModel):
@@ -23,12 +24,21 @@ class AuthEventLogModel(MongoDBBaseModel):
     def serialize_id(self, id_value: PydanticObjectId, _info):
         return str(id_value) if id_value else None
 
+    @classmethod
+    def _name(cls) -> str:
+        return "auth_event_log"
+
+    @classmethod
+    def _id_name(cls) -> str:
+        return "auth_event_log_id"
+
+    def _data_id(self) -> ObjectId:
+        return self.auth_event_log_id
+
     def save(self, user_token: UserToken = None):
         api_logger = ApiLogger(f"[MONGODB] [AUTH EVENT LOG] [SAVE]: {self.to_json()}")
 
-        server_error_log_collection = AuthEventLogManager.collection()
-
-        result = server_error_log_collection.insert_one(self.to_bson())
+        result = self.collection().insert_one(self.to_bson())
 
         self.auth_event_log_id = result.inserted_id
         api_logger.print_log(f"Auth Event Log ID: {self.auth_event_log_id}")
