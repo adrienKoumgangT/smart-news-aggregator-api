@@ -14,3 +14,4 @@ python-dotenv~=1.1.1
 pydantic_core
 prometheus_client~=0.22.1
 email_validator~=2.2.0
+gunicorn
