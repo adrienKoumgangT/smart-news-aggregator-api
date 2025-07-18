@@ -1,4 +1,4 @@
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from threading import Thread
 from typing import Optional
 
@@ -179,6 +179,9 @@ class User(UserMe):
             "preferences": self.preferences,
             "preferences_enable": self.preferences_enable,
         }
+
+    def _cache(self, user_token: UserToken, expire: Optional[timedelta] = timedelta(hours=1), **kwargs):
+        return super()._cache(user_token, expire=expire, **kwargs)
 
     @classmethod
     def get_directly(cls, user_id: str):

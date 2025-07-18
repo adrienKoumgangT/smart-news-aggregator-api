@@ -1,7 +1,7 @@
 import datetime
 
 from flask import g, request, jsonify
-from flask_restx import Namespace, Resource, fields, Api
+from flask_restx import Namespace, Resource, fields
 
 from src.apps import token_required
 from src.lib.configuration.configuration import config_manager
@@ -35,8 +35,8 @@ class AdminArticles(Resource):
 
         user_token: UserToken = g.user
 
-        total = ArticleModel.get_list_count()
-        articles = ArticleModel.get_list(page=page, limit=limit)
+        total = ArticleModel.get_all_count(user_token)
+        articles = ArticleModel.get_all(user_token, page=page, limit=limit)
 
         ArticleModel.cache_articles(user_token, articles=articles)
 
@@ -98,11 +98,11 @@ class AdminUsers(Resource):
 
         user_token: UserToken = g.user
 
-        total = User.get_list_count()
+        total = User.get_all_count(user_token)
         users = User.get_all(user_token, page=page, limit=limit)
 
         users_me = [user.to_me() for user in users]
-        print(users_me)
+        # print(users_me)
         return {
             "users": [user_me.to_json() for user_me in users_me],
             "total": total,

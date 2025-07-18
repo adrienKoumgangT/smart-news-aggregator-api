@@ -3,6 +3,7 @@ from flask_restx import Namespace, Resource
 
 from src.apps import token_required
 from src.lib.authentication.auth_token import UserToken
+from src.models.article.article_model import ArticleModel
 from src.models.user.user_model import User, UserMe, UserMePreferences, Address
 
 ns_user = Namespace('user', description='User related operations')
@@ -82,6 +83,8 @@ class UserMePreferenceResource(Resource):
 
         is_updated = user.update_user(user_token)
         if is_updated:
+            ArticleModel.scache_last_articles(user_token, preferences)
+            ArticleModel.scache_last_articles_count(user_token, preferences)
             return user.to_preferences_json()
         return jsonify({"message": "Error during update"}), 400
 

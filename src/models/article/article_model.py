@@ -149,6 +149,9 @@ class ArticleModel(ArticleSummaryModel):
             exclude={"created_at", "updated_at"},
         )
 
+    def _cache(self, user_token: UserToken, expire: Optional[timedelta] = timedelta(hours=1), **kwargs):
+        super()._cache(user_token, expire=expire, **kwargs)
+
     def save(self, user_token: UserToken):
         article_check = {
                 'extern_api': self.extern_api,
@@ -167,7 +170,49 @@ class ArticleModel(ArticleSummaryModel):
         return self.article_id
 
     @classmethod
+    def _cache_all_tags_key(cls):
+        return f"article:tags"
+
+    @classmethod
+    def _cache_all_tags(cls, tags: list[str], expire: Optional[timedelta] = timedelta(hours=1)):
+        key = cls._cache_all_tags_key()
+
+        api_logger = ApiLogger(f"[REDIS] [ARTICLE TAGS] [CACHE] : key={key} and expire={expire}")
+
+        data_json = json.dumps(tags, cls=MyJSONEncoder)
+        RedisManagerInstance.get_instance().set(key=key, value=data_json, ex=expire)
+
+        api_logger.print_log()
+
+    @classmethod
+    def _scache_all_tags(cls):
+        key = cls._cache_all_tags_key()
+
+        api_logger = ApiLogger(f"[REDIS] [ARTICLE TAGS] [SCACHE] : {key}")
+
+        RedisManagerInstance.get_instance().delete(key=key)
+
+        api_logger.print_log()
+
+    @classmethod
+    def _get_all_tags(cls):
+        key = cls._cache_all_tags_key()
+
+        api_logger = ApiLogger(f"[REDIS] [ARTICLE TAGS] [GET] : {key}")
+        data_caching = RedisManagerInstance.get_instance().get(key=key)
+        if data_caching:
+            data_json = json.loads(data_caching, object_hook=my_json_decoder)
+            api_logger.print_log()
+            return data_json
+        api_logger.print_error(message_error="Cache missing")
+        return None
+
+    @classmethod
     def get_all_tags(cls, user_token, search: str = None):
+        tags = cls._get_all_tags()
+        if tags:
+            return tags
+
         api_logger = ApiLogger(f"[MONGODB] [ARTICLE TAGS] [GET ALL] : search = {search}")
         if search:
             pipeline = [
@@ -190,12 +235,62 @@ class ArticleModel(ArticleSummaryModel):
         tags = result[0]['matchedTags'] if result else []
 
         api_logger.print_log()
+
+        cls._cache_all_tags(tags)
+
         return tags
 
+    @classmethod
+    def _cache_last_articles_count_key(cls, user_token: UserToken, preferences: list[str] = None):
+        if preferences is None or len(preferences) == 0:
+            return f"article:last:count"
+        return f"article:last:{user_token.user_id}:count"
+
+    @classmethod
+    def _last_articles_count(cls, user_token: UserToken, preferences: list[str] = None):
+        key = cls._cache_last_articles_count_key(user_token, preferences)
+
+        api_logger = ApiLogger(f"[REDIS] [{cls._name().upper()}] [GET LAST COUNT] : {key}")
+        data_caching = RedisManagerInstance.get_instance().get(key=key)
+        if data_caching:
+            api_logger.print_log()
+            return int(data_caching)
+        api_logger.print_error(message_error="Cache missing")
+        return None
+
+    @classmethod
+    def _cache_last_articles_count(cls
+                                   , user_token: UserToken
+                                   , total: int
+                                   , preferences: list[str] = None
+                                   , expire: Optional[timedelta] = timedelta(hours=1)
+                                   ):
+        key = cls._cache_last_articles_count_key(user_token, preferences)
+
+        api_logger = ApiLogger(f"[REDIS] [{cls._name().upper()}] [LAST COUNT] [CACHE] : {key}")
+
+        total_str = str(total)
+        RedisManagerInstance.get_instance().set(key=key, value=total_str, ex=expire)
+
+        api_logger.print_log()
+
+    @classmethod
+    def scache_last_articles_count(cls, user_token: UserToken, preferences: list[str] = None):
+        key = cls._cache_last_articles_count_key(user_token, preferences)
+
+        api_logger = ApiLogger(f"[REDIS] [{cls._name().upper()}] [LAST COUNT] [SCACHE] : {key}")
+
+        RedisManagerInstance.get_instance().delete(key=key)
+
+        api_logger.print_log()
 
     @classmethod
     def last_articles_count(cls, user_token: UserToken, preferences: list[str] = None):
-        api_logger = ApiLogger(f"[MONGODB] [ARTICLE COUNT] [GET] : preferences={preferences}")
+        total = cls._last_articles_count(user_token, preferences)
+        if total:
+            return total
+
+        api_logger = ApiLogger(f"[MONGODB] [ARTICLE LASTEST COUNT] [GET] : preferences={preferences}")
         if preferences:
             filter_search = {
                 'tags': {
@@ -207,11 +302,77 @@ class ArticleModel(ArticleSummaryModel):
         with MONGO_QUERY_TIME.time():
             total = cls.collection().count_documents(filter_search)
         api_logger.print_log()
-        return total if (total and total > 0) else 0
 
+        total = total if (total and total > 0) else 0
+
+        cls._cache_last_articles_count(user_token, total, preferences)
+
+        return total
+
+    @classmethod
+    def _cache_last_articles_key(cls, user_token: UserToken, preferences: list[str] = None, page: int = 1, limit: int = 10):
+        if preferences is None or len(preferences) == 0:
+            return f"article:last:{page}:{limit}"
+        return f"article:last:{user_token.user_id}:{page}:{limit}"
+
+    @classmethod
+    def _cache_last_articles_key_pattern(cls, user_token: UserToken, preferences: list[str] = None):
+        if preferences is None or len(preferences) == 0:
+            return f"article:last:*"
+        return f"article:last:{user_token.user_id}:*"
+
+    @classmethod
+    def _last_articles(cls, user_token: UserToken, preferences: list[str] = None, page: int = 1, limit: int = 10):
+        key = cls._cache_last_articles_key(user_token, preferences, page, limit)
+
+        api_logger = ApiLogger(f"[REDIS] [ARTICLE LATEST] [GET] : page={page}, limit={limit} and preferences={preferences}")
+        data_caching = RedisManagerInstance.get_instance().get(key=key)
+        if data_caching:
+            api_logger.print_log()
+            data_list = json.loads(data_caching)
+            results = []
+            for data_json in data_list:
+                # data_json = json.loads(data, object_hook=my_json_decoder)
+                data_json['_id'] = ObjectId(data_json[cls._id_name()])
+                api_logger.print_log()
+                results.append(cls(**data_json))
+            return results
+        api_logger.print_error(message_error="Cache missing")
+        return None
+
+    @classmethod
+    def _cache_last_articles(cls
+                             , user_token: UserToken
+                             , data: list
+                             , preferences: list[str] = None
+                             , page: int = 1, limit: int = 10
+                             , expire: Optional[timedelta] = timedelta(hours=1)
+                             ):
+        key = cls._cache_last_articles_key(user_token, preferences, page, limit)
+
+        api_logger = ApiLogger(f"[REDIS] [{cls._name().upper()}] [LATEST] [CACHE] : {key}")
+
+        data_json = json.dumps(data, cls=MyJSONEncoder)
+        RedisManagerInstance.get_instance().set(key=key, value=data_json, ex=expire)
+
+        api_logger.print_log()
+
+    @classmethod
+    def scache_last_articles(cls, user_token: UserToken, preferences: list[str] = None):
+        key_pattern = cls._cache_last_articles_key_pattern(user_token, preferences)
+
+        api_logger = ApiLogger(f"[REDIS] [{cls._name().upper()}] [LATEST] [SCACHE] : {key_pattern}")
+
+        RedisManagerInstance.get_instance().delete_pattern(pattern=key_pattern)
+
+        api_logger.print_log()
 
     @classmethod
     def last_articles(cls, user_token: UserToken, preferences: list[str] = None, page: int = 1, limit: int = 10):
+        data_last_cache = cls._last_articles(user_token, preferences, page, limit)
+        if data_last_cache:
+            return data_last_cache
+
         api_logger = ApiLogger(f"[MONGODB] [ARTICLE LATEST] [GET] : page={page}, limit={limit} and preferences={preferences}")
         if preferences:
             filter_search = {
@@ -235,9 +396,11 @@ class ArticleModel(ArticleSummaryModel):
 
         api_logger.print_log()
 
-        if results:
-            return [cls(**result) for result in results]
-        return []
+        last_all = [cls(**result) for result in results]
+
+        cls._cache_last_articles(user_token, last_all, preferences, page, limit)
+
+        return last_all
 
     @classmethod
     def _create_search_query(cls, query):
@@ -322,11 +485,21 @@ class ArticleSearchModel(DataBaseModel):
         })
 
     @classmethod
+    def _cache_search_articles_key(cls, user_token: UserToken, query: str, page: int = 1, limit: int = 10):
+        return f"article:search:{query}:{page}:{limit}"
+
+    @classmethod
+    def _cache_search_articles(cls, user_token: UserToken, articles: list, query: str, page: int = 1, limit: int = 10):
+        key = cls._cache_search_articles_key(user_token, query, page, limit)
+
+        api_logger = ApiLogger(f"[REDIS] [ARTICLE] [SEARCH] [CACHE] : {key}")
+
+    @classmethod
     def search_articles(cls, user_token: UserToken, query: str, page: int = 1, limit: int = 10):
         if not query:
             return ArticleModel.last_articles(user_token, page=page, limit=limit)
 
-        api_logger = ApiLogger(f"[MONGODB] [ARTICLE LATEST] [GET] : query={query}, page={page} and limit={limit}")
+        api_logger = ApiLogger(f"[MONGODB] [ARTICLE] [SEARCH] [GET] : query={query}, page={page} and limit={limit}")
 
         pipeline = [
             {

@@ -214,7 +214,7 @@ class MongoDBBaseModel(BaseModel):
         api_logger.print_log()
 
     @classmethod
-    def _scache_all_count(cls, user_token: UserToken, after_date: datetime = None, before_date: datetime = None):
+    def scache_all_count(cls, user_token: UserToken, after_date: datetime = None, before_date: datetime = None):
         key = cls._cache_all_count_key(user_token, after_date, before_date)
 
         api_logger = ApiLogger(f"[REDIS] [{cls._name().upper()}] [LIST COUNT] [SCACHE] : {key}")
@@ -280,7 +280,69 @@ class MongoDBBaseModel(BaseModel):
         return total
 
     @classmethod
+    def _cache_all_key(cls, user_token: UserToken, extra_match: dict = None, page: int = 1, limit: Optional[int] = 10):
+        if extra_match is None or len(extra_match) == 0:
+            return f"{cls._name()}:all:{page}:{limit}"
+        return f"{cls._name()}:all:{extra_match}:{page}:{limit}"
+
+    @classmethod
+    def _cache_all_key_pattern(cls, user_token: UserToken, extra_match: dict = None):
+        if extra_match is None or len(extra_match) == 0:
+            return f"{cls._name()}:all:*"
+        return f"{cls._name()}:all:{extra_match}:*"
+
+    @classmethod
+    def _get_all(cls, user_token: UserToken, extra_match: dict = None, page: int = 1, limit: Optional[int] = 10):
+        key = cls._cache_all_key(user_token, extra_match, page, limit)
+
+        api_logger = ApiLogger(f"[REDIS] [{cls._name().upper()}] [GET ALL] : {key}")
+        data_caching = RedisManagerInstance.get_instance().get(key=key)
+        if data_caching:
+            api_logger.print_log()
+            data_list = json.loads(data_caching)
+            results = []
+            for data_json in data_list:
+                # data_json = json.loads(data, object_hook=my_json_decoder)
+                data_json['_id'] = ObjectId(data_json[cls._id_name()])
+                api_logger.print_log()
+                results.append(cls(**data_json))
+            return results
+        api_logger.print_error(message_error="Cache missing")
+        return None
+
+    @classmethod
+    def _cache_get_all(cls
+                   , user_token: UserToken
+                   , data: list
+                   , extra_match: dict = None
+                   , page: int = 1, limit: Optional[int] = 10
+                   , expire: Optional[timedelta] = timedelta(hours=1)
+                   ):
+        key = cls._cache_all_key(user_token, extra_match, page, limit)
+
+        api_logger = ApiLogger(f"[REDIS] [{cls._name().upper()}] [LIST ALL] [CACHE] : {key}")
+
+        data_json = json.dumps(data, cls=MyJSONEncoder)
+        RedisManagerInstance.get_instance().set(key=key, value=data_json, ex=expire)
+
+        api_logger.print_log()
+
+    @classmethod
+    def scache_get_all(cls, user_token: UserToken, extra_match: dict = None):
+        key_pattern = cls._cache_all_key_pattern(user_token, extra_match)
+
+        api_logger = ApiLogger(f"[REDIS] [{cls._name().upper()}] [LIST ALL] [SCACHE] : {key_pattern}")
+
+        RedisManagerInstance.get_instance().delete_pattern(pattern=key_pattern)
+
+        api_logger.print_log()
+
+    @classmethod
     def get_all(cls, user_token: UserToken, extra_match: dict = None, page: int = 1, limit: Optional[int] = 10):
+        data_all_cache = cls._get_all(user_token, extra_match, page, limit)
+        if data_all_cache:
+            return data_all_cache
+
         if extra_match is None:
             extra_match = {}
         query_params = {
@@ -295,7 +357,11 @@ class MongoDBBaseModel(BaseModel):
 
         api_logger.print_log()
 
-        return [cls(**result) for result in results]
+        data_all = [cls(**result) for result in results]
+
+        cls._cache_get_all(user_token, data_all, extra_match, page, limit)
+
+        return data_all
 
     @classmethod
     def get_by(cls, user_token: UserToken, extra_filter: dict = {}, page: int = 1, limit: Optional[int] = 10):

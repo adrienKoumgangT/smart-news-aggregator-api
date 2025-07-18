@@ -4,6 +4,8 @@ from typing import TypeVar, Optional, Type, List
 
 from dotenv import load_dotenv
 
+from src.lib.log.api_logger import ApiLogger
+
 
 def to_env_var_name(key: str) -> str:
     return key.strip().replace(".", "_").replace("-", "_").upper()
@@ -69,6 +71,7 @@ class Config:
     port: int = field(default_factory=lambda: get_env_var("port", 5000, int))
 
     allowed_hosts: List[str] = field(default_factory=lambda: get_env_var("allowed.hosts", "localhost,127.0.0.1", list))
+    swagger_allowed: bool = field(default_factory=lambda: get_env_var("swagger.allowed", False, bool))
     swagger_allowed_hosts: List[str] = field(default_factory=lambda: get_env_var("swagger.allowed.hosts", "127.0.0.1/32", list))
 
     mongo: MongoConfig = field(default_factory=MongoConfig)
@@ -84,10 +87,12 @@ class ConfigManager:
     def reload(self):
         # Reload .env
         env_file = os.getenv("FLASK_ENV_FILE", ".env.dev")
-        print(f"env_file: {env_file}")
+        # print(f"env_file: {env_file}")
         env_path = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), '..', env_file)
-        print(f"env_path: {env_path}")
+        # print(f"env_path: {env_path}")
+        api_logger = ApiLogger(f"[CONFIGURATION] [RELOAD] [ENV] : path file={env_path}")
         load_dotenv(dotenv_path=env_path, verbose=True, override=True)
+        api_logger.print_log()
 
         # Rebuild the config dataclass
         self._config = Config()

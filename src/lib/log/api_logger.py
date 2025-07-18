@@ -5,14 +5,29 @@ from typing import Optional
 
 
 class EnumColor(IntEnum):
+    BLACK = 0
     RED = 196
     GREEN = 46
     YELLOW = 220
-    LIGHT_PURPLE = 0
-    PURPLE = 0
-    CYAN = 0
-    LIGHT_GRAY = 0
-    BLACK = 0
+    BLUE = 21
+    MAGENTA = 201
+    CYAN = 51
+    WHITE = 15
+    GRAY = 8
+    LIGHT_RED = 9
+    LIGHT_GREEN = 10
+    LIGHT_YELLOW = 11
+    LIGHT_BLUE = 12
+    LIGHT_MAGENTA = 13
+    LIGHT_CYAN = 14
+    LIGHT_WHITE = 15
+    DARK_GRAY = 240
+    ORANGE = 208
+    PINK = 213
+    TEAL = 44
+    PURPLE = 93
+    LIGHT_PURPLE = 183
+    BROWN = 130
 
 
 def test_color():
@@ -73,9 +88,9 @@ class ApiLogger(object):
 
 
 if __name__ == '__main__':
-    test_color()
+    # test_color()
     # test_color2("Adrian")
     api_logger = ApiLogger("Message de log")
     api_logger.print_log()
     time.sleep(1)
-    api_logger.print_log(EnumColor.RED)
+    api_logger.print_log(color=EnumColor.CYAN)

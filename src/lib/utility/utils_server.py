@@ -3,6 +3,7 @@ from typing import Optional
 from flask import Request
 from flask_restx import Namespace, fields
 
+from src.lib.log.api_logger import ApiLogger, EnumColor
 from src.models import DataBaseModel
 
 
@@ -43,5 +44,11 @@ class RequestData(DataBaseModel):
             form=form_data,
         )
 
+class RequestUtility:
 
+    @classmethod
+    def print_info_request(cls, request: Request):
+        request_data = RequestData.from_request(request=request)
+
+        ApiLogger(f"[HTTP REQUEST] [{request_data.method}] {request_data.url} {request_data.body if request_data.body else ''}", color=EnumColor.CYAN)
 

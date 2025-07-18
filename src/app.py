@@ -13,7 +13,7 @@ from src.apps.test_endpoint import ns_test
 from src.apps.user_endpoint import ns_user
 from src.lib.configuration.configuration import get_env_var, config
 from src.lib.exception.exception_handler import register_error_handlers
-
+from src.lib.utility.utils_server import RequestUtility
 
 ALLOWED_NETWORKS = config.swagger_allowed_hosts
 
@@ -68,12 +68,15 @@ def create_app():
 
     @app.before_request
     def restrict_swagger_access():
+        RequestUtility.print_info_request(request)
         if request.path.startswith("/docs") or request.path.startswith("/swagger"):
-            if config.prod:
+            # print(f"swagger is allowed: {config.swagger_allowed}")
+            if config.swagger_allowed:
                 allowed_networks = [ipaddress.ip_network(network) for network in ALLOWED_NETWORKS]
-                print(f"allowed networks: {ALLOWED_NETWORKS}")
-                print(f"is prod: {config.prod}")
+                # print(f"allowed networks: {ALLOWED_NETWORKS}")
+                # print(f"is prod: {config.prod}")
                 client_ip = ipaddress.ip_address(request.remote_addr)
+                # print(f"client ip: {client_ip}")
                 if not any(client_ip in net for net in allowed_networks):
                     abort(403)
 
