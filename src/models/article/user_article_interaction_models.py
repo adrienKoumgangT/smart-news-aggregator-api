@@ -8,6 +8,7 @@ from pydantic import Field, field_serializer
 from pymongo.errors import DuplicateKeyError
 
 from src.lib.database.nosql.document.mongodb.base import MongoDBBaseModel
+from src.lib.database.nosql.document.mongodb.mongodb_monitoring_middleware import MONGO_QUERY_TIME
 from src.lib.database.nosql.document.mongodb.objectid import PydanticObjectId
 from src.lib.log.api_logger import ApiLogger
 from src.models import DataBaseModel
@@ -135,12 +136,14 @@ class UserArticleInteractionModel(MongoDBBaseModel):
             if self.interaction_id:
                 data = self.to_json()
                 del data["interaction_id"]
-                result = self.collection().update_one(
-                    {"_id": ObjectId(self.interaction_id)},
-                    {"$set": data}
-                )
+                with MONGO_QUERY_TIME.time():
+                    result = self.collection().update_one(
+                        {"_id": ObjectId(self.interaction_id)},
+                        {"$set": data}
+                    )
             else:
-                result = self.collection().insert_one(self.to_bson())
+                with MONGO_QUERY_TIME.time():
+                    result = self.collection().insert_one(self.to_bson())
         except DuplicateKeyError:
             api_logger.print_error("User already exists")
             return None
@@ -162,20 +165,21 @@ class UserArticleInteractionModel(MongoDBBaseModel):
             "shared": False,
             "saved": False
         }
-        result = cls.collection().update_one(
-            filter=filter_key,
-            update={
-                "$set": {
-                    "read_at": datetime_operation,
-                    "updated_at": datetime_operation
+        with MONGO_QUERY_TIME.time():
+            result = cls.collection().update_one(
+                filter=filter_key,
+                update={
+                    "$set": {
+                        "read_at": datetime_operation,
+                        "updated_at": datetime_operation
+                    },
+                    "$setOnInsert": data_on_insert,
+                    "$inc": {
+                        "time_spent": 1  # increment by 1 time
+                    }
                 },
-                "$setOnInsert": data_on_insert,
-                "$inc": {
-                    "time_spent": 1  # increment by 1 time
-                }
-            },
-            upsert=True
-        )
+                upsert=True
+            )
         cls._scache(user_token, article_id)
         api_logger.print_log(f"Update result: {result.modified_count > 0}")
 
@@ -199,13 +203,14 @@ class UserArticleInteractionModel(MongoDBBaseModel):
     @classmethod
     def get_by_user_article(cls, user_id: str, article_id: str, comment_id: str = None):
         api_logger = ApiLogger(f"[MONGODB] [USER ARTICLE INTERACTION] [GET] [BY USER ARTICLE] : user={user_id}, article={article_id} and comment={comment_id}")
-        interaction = cls.collection().find_one(
-            {
-                "user_id": user_id,
-                "article_id": article_id,
-                "comment_id": comment_id,
-            }
-        )
+        with MONGO_QUERY_TIME.time():
+            interaction = cls.collection().find_one(
+                {
+                    "user_id": user_id,
+                    "article_id": article_id,
+                    "comment_id": comment_id,
+                }
+            )
         if interaction is None:
             api_logger.print_error("User Article Interaction does not exist")
             return None
@@ -230,7 +235,8 @@ class UserArticleInteractionModel(MongoDBBaseModel):
             }
         ]
 
-        stats = cls.collection().aggregate(pipeline)
+        with MONGO_QUERY_TIME.time():
+            stats = cls.collection().aggregate(pipeline)
         if stats is None:
             api_logger.print_error("Error during retrieving statistics")
             return ArticleInteractionStats()
@@ -248,7 +254,8 @@ class UserArticleInteractionModel(MongoDBBaseModel):
     @classmethod
     def read_history_count(cls, user_id: str):
         api_logger = ApiLogger(f"[MONGODB] [USER ARTICLE INTERACTION] [GET] [HISTORY] : user={user_id}")
-        total =  cls.collection().count_documents({"user_id": user_id, "read_at": {"$exists": True}})
+        with MONGO_QUERY_TIME.time():
+            total =  cls.collection().count_documents({"user_id": user_id, "read_at": {"$exists": True}})
         api_logger.print_log()
         return total if (total and total > 0) else 0
 
@@ -256,10 +263,11 @@ class UserArticleInteractionModel(MongoDBBaseModel):
     def get_read_history(cls, user_id: str, page: int = 1, limit: int = 5):
         api_logger = ApiLogger(f"[MONGODB] [USER ARTICLE INTERACTION] [GET] [HISTORY] : user={user_id}, page={page} and limit={limit}")
 
-        result = cls.collection().find(
-            {"user_id": user_id, "read_at": {"$exists": True}},
-            # {"_id": 0, "article_id": 1, "read_at": 1, "time_spent": 1}
-        ).sort("read_at", -1).skip(limit * (page-1)).limit(limit)
+        with MONGO_QUERY_TIME.time():
+            result = cls.collection().find(
+                {"user_id": user_id, "read_at": {"$exists": True}},
+                # {"_id": 0, "article_id": 1, "read_at": 1, "time_spent": 1}
+            ).sort("read_at", -1).skip(limit * (page-1)).limit(limit)
 
         if result:
             api_logger.print_log()
@@ -481,7 +489,8 @@ class ArticleInteractionDashboard(DataBaseModel):
                 }
             ]
 
-        stats = UserArticleInteractionModel.collection().aggregate(pipeline)
+        with MONGO_QUERY_TIME.time():
+            stats = UserArticleInteractionModel.collection().aggregate(pipeline)
         if stats is None:
             api_logger.print_error("Error during retrieving statistics")
 

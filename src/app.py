@@ -1,12 +1,14 @@
 import ipaddress
 
-from flask import Flask, Blueprint, render_template_string, request, abort
+from flask import Flask, Blueprint, render_template_string, request, abort, Response
 from flask_cors import CORS
 from flask_restx import Api
+from prometheus_client import generate_latest, CONTENT_TYPE_LATEST
 
 from src.apps.admin_endpoint import ns_admin
 from src.apps.article_endpoint import ns_article
 from src.apps.auth_endpoint import ns_auth
+from src.apps.metric_endpoint import ns_metrics
 from src.apps.test_endpoint import ns_test
 from src.apps.user_endpoint import ns_user
 from src.lib.configuration.configuration import get_env_var, config
@@ -117,6 +119,10 @@ def create_app():
         }
     }
 
+    @app.route("/metrics")
+    def metrics():
+        return Response(generate_latest(), mimetype=CONTENT_TYPE_LATEST)
+
     blueprint = Blueprint('api', __name__, url_prefix='/api')
     api = Api(
         blueprint,
@@ -127,6 +133,8 @@ def create_app():
         authorizations=authorizations,
         security="BearerAuth"  # Apply to all routes unless overridden
     )
+
+    api.add_namespace(ns_metrics, path='/metrics')
 
     api.add_namespace(ns_admin, path='/admin')
 

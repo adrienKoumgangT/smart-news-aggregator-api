@@ -14,7 +14,7 @@ def get_env_var(name: str, default: Optional[T] = None, var_type: Type[T] = str,
     var_name = to_env_var_name(name)
     value = os.getenv(var_name, default)
 
-    print(f"{var_name} = {value}")
+    # print(f"{var_name} = {value}")
 
     if value is None:
         return default

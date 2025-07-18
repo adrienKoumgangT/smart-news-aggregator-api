@@ -4,8 +4,8 @@ from flask_restx import Namespace, Resource
 from src.apps import token_required
 from src.lib.exception.exception_server import NotFoundException, UnauthorizedException
 from src.models.article.article_model import ArticleSummaryModel, ArticleModel, ArticleWithInteractionModel, \
-    ArticleTagsModel
-from src.models.article.comment_model import CommentModel
+    ArticleTagsModel, ArticleSearchModel
+from src.models.article.comment_model import CommentModel, CommentDetailsModel
 from src.models.article.user_article_interaction_models import UserArticleInteractionModel, UserArticleInteraction, \
     ArticleInteractionStatus, ArticleInteractionType
 from src.models.model import Model
@@ -70,6 +70,39 @@ class LatestArticleResource(Resource):
         else:
             total = ArticleModel.last_articles_count(user_token)
             articles = ArticleModel.last_articles(user_token, page=page, limit=limit)
+
+        ArticleModel.cache_articles(user_token, articles=articles)
+
+        return {
+            "articles": [article.to_summary() for article in articles],
+            "total": total,
+            "page": page,
+            "limit": limit,
+            "pageCount": len(articles),
+        }
+
+
+@ns_article.route('/search')
+@ns_article.param('q', 'Query search')
+@ns_article.param('page', 'Page')
+@ns_article.param('limit', 'Number of articles to return')
+class SearchArticleResource(Resource):
+
+    @token_required
+    @ns_article.marshal_with(ArticleSummaryModel.to_model_list(name_space=ns_article), code=200)
+    def get(self):
+        query_arg = request.args.get('q', default='', type=str)
+        page_arg = request.args.get('page', default=1, type=int)
+        limit_arg = request.args.get('limit', default=10, type=int)
+
+        query = query_arg if query_arg else ''
+        page = page_arg if page_arg > 0 else 1
+        limit = limit_arg if limit_arg > 0 else 10
+
+        user_token: UserToken = g.user
+
+        total = ArticleModel.search_articles_count(user_token, query=query)
+        articles = ArticleModel.search_articles(user_token, query=query, page=page, limit=limit)
 
         ArticleModel.cache_articles(user_token, articles=articles)
 
@@ -233,7 +266,7 @@ class ArticleCommentResource(Resource):
         return comment.to_json()
 
 
-@ns_article.route('/<string:article_id>/comment/<int:comment_id>')
+@ns_article.route('/<string:article_id>/comment/<string:comment_id>')
 @ns_article.param('article_id', 'The article ID')
 class ArticleCommentResource2(Resource):
 
@@ -292,7 +325,7 @@ class ArticleCommentResource2(Resource):
         if comment.article_id != article_id:
             raise UnauthorizedException("You are not authorized to perform this action")
 
-        comment.delete()
+        comment.delete(user_token)
 
         return {"success": True, "message": "Comment deleted"}
 
@@ -327,6 +360,34 @@ class ArticleInteractionResource(Resource):
         if result:
             return {"success": True, "message": "Interaction updated"}
         return {"success": False, "message": "Interaction could not be updated"}
+
+
+@ns_article.route('/comment/me')
+@ns_article.param('page', 'Page')
+@ns_article.param('limit', 'Number of articles to return')
+class ArticleCommentUserResource(Resource):
+
+    @token_required
+    @ns_article.marshal_with(CommentDetailsModel.to_model_list(name_space=ns_article))
+    def get(self):
+        page_arg = request.args.get('page', default=1, type=int)
+        limit_arg = request.args.get('limit', default=10, type=int)
+
+        page = page_arg if page_arg > 0 else 1
+        limit = limit_arg if limit_arg > 0 else 10
+
+        user_token: UserToken = g.user
+
+        total = CommentDetailsModel.get_comments_count(user_token)
+        comments = CommentDetailsModel.get_user_comments_with_article(user_token, page=page, limit=limit)
+
+        return {
+            'comments': [comment.to_json() for comment in comments],
+            "page": page,
+            "limit": limit,
+            "pageCount": len(comments),
+            "total": total,
+        }
 
 
 

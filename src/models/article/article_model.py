@@ -1,4 +1,6 @@
-from datetime import datetime
+import json
+import re
+from datetime import datetime, timedelta
 from threading import Thread
 from typing import Optional, List
 
@@ -7,25 +9,16 @@ from flask_restx import fields, Namespace
 from pydantic import Field, field_serializer, BaseModel
 
 from src.lib.database.nosql.document.mongodb.base import MongoDBBaseModel
+from src.lib.database.nosql.document.mongodb.mongodb_monitoring_middleware import MONGO_QUERY_TIME
 from src.lib.database.nosql.document.mongodb.objectid import PydanticObjectId
+from src.lib.database.nosql.keyvalue.redis.redis_manager import RedisManagerInstance
 from src.lib.log.api_logger import ApiLogger
+from src.lib.utility.utils import my_json_decoder, MyJSONEncoder
 from src.models import DataBaseModel
+from src.models.article.article_source_model import ArticleSourceModel
 from src.models.article.comment_model import CommentModel
 from src.models.article.user_article_interaction_models import ArticleInteractionStatus, ArticleInteractionStats
 from src.models.user.auth_model import UserToken
-
-
-
-class ArticleSourceModel(BaseModel):
-    name: Optional[str] = None
-    url: Optional[str] = None
-
-    @staticmethod
-    def to_model(name_space: Namespace):
-        return name_space.model('ArticleSourceModel', {
-            'name': fields.String(required=True),
-            'url': fields.String(required=True),
-        })
 
 
 class ArticleSummaryModel(MongoDBBaseModel):
@@ -63,6 +56,28 @@ class ArticleSummaryModel(MongoDBBaseModel):
         cls.collection().createIndex({"tags": 1})
         cls.collection().createIndex({"published_at": -1})
         cls.collection().create_index([("tags", 1), ("published_at", -1)])
+        """
+        try:
+            cls.collection().create_index(
+                {
+                    "title": "text",
+                    "description": "text"
+                },
+                {
+                    "name": "title_desc_search_index",
+                    "weights": {
+                        "title": 3, # Higher relevance for title matches
+                        "description": 2
+                    },
+                    "default_language": "none"
+                }
+            )
+        except Exception as e:
+            print(e)
+        """
+        cls.collection().createIndex({"title": 1})
+        cls.collection().createIndex({"description": 1})
+        cls.collection().create_index([("title", 1), ("description", 1)])
 
     @staticmethod
     def to_model(name_space: Namespace):
@@ -168,7 +183,10 @@ class ArticleModel(ArticleSummaryModel):
                 {"$project": {"_id": 0, "matchedTags": 1}}
             ]
 
-        result = list(cls.collection().aggregate(pipeline))
+        with MONGO_QUERY_TIME.time():
+            data = cls.collection().aggregate(pipeline)
+
+        result = list(data)
         tags = result[0]['matchedTags'] if result else []
 
         api_logger.print_log()
@@ -186,7 +204,8 @@ class ArticleModel(ArticleSummaryModel):
             }
         else:
             filter_search = {}
-        total = cls.collection().count_documents(filter_search)
+        with MONGO_QUERY_TIME.time():
+            total = cls.collection().count_documents(filter_search)
         api_logger.print_log()
         return total if (total and total > 0) else 0
 
@@ -206,12 +225,51 @@ class ArticleModel(ArticleSummaryModel):
                         'published_at': -1
                     }.items())
 
-        results = cls.collection().find(
-            filter=filter_search,
-            sort=sort,
-            skip=limit * (page - 1),
-            limit=limit
-        )
+        with MONGO_QUERY_TIME.time():
+            results = cls.collection().find(
+                filter=filter_search,
+                sort=sort,
+                skip=limit * (page - 1),
+                limit=limit
+            )
+
+        api_logger.print_log()
+
+        if results:
+            return [cls(**result) for result in results]
+        return []
+
+    @classmethod
+    def _create_search_query(cls, query):
+        # Create case-insensitive regex pattern
+        regex_pattern = f'.*{re.escape(query)}.*'
+        regex_options = 'i'  # Case-insensitive
+
+        return {
+            '$or': [
+                {'title': {'$regex': regex_pattern, '$options': regex_options}},
+                {'description': {'$regex': regex_pattern, '$options': regex_options}}
+            ]
+        }
+
+    @classmethod
+    def search_articles_count(cls, user_token: UserToken, query: str):
+        api_logger = ApiLogger(f"[MONGODB] [ARTICLE COUNT] [GET] : query={query}")
+
+        with MONGO_QUERY_TIME.time():
+            total = cls.collection().count_documents(cls._create_search_query(query=query))
+        api_logger.print_log()
+        return total if (total and total > 0) else 0
+
+    @classmethod
+    def search_articles(cls, user_token: UserToken, query: str, page: int = 1, limit: int = 10):
+        if not query:
+            return cls.last_articles(user_token, page=page, limit=limit)
+
+        api_logger = ApiLogger(f"[MONGODB] [ARTICLE SEARCH] [GET] : query={query}, page={page} and limit={limit}")
+
+        with MONGO_QUERY_TIME.time():
+            results = cls.collection().find(cls._create_search_query(query=query)).sort('published_at', -1).skip((page - 1) * limit).limit(limit)
 
         api_logger.print_log()
 
@@ -229,6 +287,89 @@ class ArticleModel(ArticleSummaryModel):
         thread = Thread(target=cls._cache_articles, args=(user_token, articles,))
         thread.daemon = True
         thread.start()
+
+
+class ArticleSearchModel(DataBaseModel):
+    article_id: str
+    extern_api: str
+    title: Optional[str]
+    description: Optional[str]
+    published_at: Optional[str]
+    source: Optional[ArticleSourceModel] = None
+    author: Optional[ArticleSourceModel] = None
+
+    @staticmethod
+    def to_model(name_space: Namespace):
+        return name_space.model('ArticleSearchModel', {
+            'article_id': fields.String(required=False),
+            'extern_id': fields.String(required=False),
+            'extern_api': fields.String(required=False),
+            'title': fields.String(required=True),
+            'description': fields.String(required=False),
+            'author': fields.Nested(ArticleSourceModel.to_model(name_space)),
+            'source': fields.Nested(ArticleSourceModel.to_model(name_space)),
+            'published_at': fields.String(required=True),
+        })
+
+    @staticmethod
+    def to_model_list(name_space: Namespace):
+        return name_space.model('ArticleSearchModelList', {
+            'articles': fields.List(fields.Nested(ArticleWithInteractionModel.to_model(name_space)), ),
+            'total': fields.Integer,
+            'page': fields.Integer,
+            'limit': fields.Integer,
+            'pageCount': fields.Integer,
+        })
+
+    @classmethod
+    def search_articles(cls, user_token: UserToken, query: str, page: int = 1, limit: int = 10):
+        if not query:
+            return ArticleModel.last_articles(user_token, page=page, limit=limit)
+
+        api_logger = ApiLogger(f"[MONGODB] [ARTICLE LATEST] [GET] : query={query}, page={page} and limit={limit}")
+
+        pipeline = [
+            {
+                "$match": {
+                    "$text": {
+                        "$search": query,
+                        # "$language": "english"
+                    }
+                }
+            },
+            {
+                "$project": {
+                    'article_id': '$_id',
+                    'extern_api': 1,
+                    'extern_id': 1,
+                    "title": 1,
+                    "description": 1,
+                    'source': 1,
+                    'author': 1,
+                    "score": {"$meta": "textScore"},
+                    "published_at": 1
+                }
+            },
+            {
+                "$sort": {"score": -1, "published_at": -1}  # Relevance + recency
+            },
+            {
+                "$skip": (page - 1) * limit
+            },
+            {
+                "$limit": limit
+            }
+        ]
+
+        with MONGO_QUERY_TIME.time():
+            results = ArticleModel.collection().aggregate(pipeline)
+
+        if results is None:
+            api_logger.print_error("Error occurred during article search")
+            return []
+
+        api_logger.print_log()
+        return [cls(**result) for result in list(results)]
 
 
 class ArticleWithInteractionModel(ArticleModel):
@@ -302,7 +443,40 @@ class ArticleCommentStats(DataBaseModel):
         })
 
     @classmethod
+    def _cache_key_stats(cls, article_id: str, comment_id: str = None):
+        if comment_id is None:
+            return f"article:{article_id}:comment:stats"
+        return f"article:{article_id}:comment:{comment_id}:stats"
+
+    @classmethod
+    def _cache(cls, stats_list, article_id: str, comment_id: str = None, expire: Optional[timedelta] = timedelta(minutes=10), **kwargs):
+        key = cls._cache_key_stats(article_id, comment_id)
+
+        api_logger = ApiLogger(f"[REDIS] [ARTICLE] [MOST COMMENT] [SET] : key={key} and expire={expire}")
+
+        data_json = json.dumps(stats_list, cls=MyJSONEncoder)
+        RedisManagerInstance.get_instance().set(key=key, value=data_json, ex=expire)
+
+        api_logger.print_log()
+
+    @classmethod
+    def _get_stats(cls, article_id: str, comment_id: str = None):
+        key = cls._cache_key_stats(article_id, comment_id)
+        api_logger = ApiLogger(f"[REDIS] [ARTICLE] [MOST COMMENT] [GET] : {key}")
+        data_caching = RedisManagerInstance.get_instance().get(key=key)
+        if data_caching:
+            data_json = json.loads(data_caching, object_hook=my_json_decoder)
+            api_logger.print_log()
+            return cls(**data_json)
+        api_logger.print_error(message_error="Cache missing")
+        return None
+
+    @classmethod
     def get_stats(cls, article_id: str, comment_id: str = None):
+        stats_list = cls._get_stats(article_id, comment_id)
+        if stats_list is not None:
+            return stats_list
+
         api_logger = ApiLogger(f"[MONGODB] [ARTICLE] [MOST COMMENT] : article={article_id} and comment={comment_id}")
 
         pipeline = [
@@ -344,13 +518,17 @@ class ArticleCommentStats(DataBaseModel):
             }
         ]
 
-        stats = CommentModel.collection().aggregate(pipeline)
+        with MONGO_QUERY_TIME.time():
+            stats = CommentModel.collection().aggregate(pipeline)
         if stats is None:
             api_logger.print_error("Error during retrieving statistics")
             return []
         api_logger.print_log()
-        stats_list = list(stats)
-        return [cls(**stat) for stat in stats_list]
+        stats_list = [cls(**stat) for stat in list(stats)]
+
+        cls._cache(stats_list, article_id, comment_id)
+
+        return stats_list
 
 
 

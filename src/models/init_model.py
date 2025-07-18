@@ -1,13 +1,13 @@
-from src.models.article.article_model import ArticleManager
-from src.models.article.comment_model import CommentManager
-from src.models.article.user_article_interaction_models import UserArticleInteractionManager
-from src.models.user.user_model import UserManager
+from src.models.article.article_model import ArticleModel
+from src.models.article.comment_model import CommentModel
+from src.models.article.user_article_interaction_models import UserArticleInteraction
+from src.models.user.user_model import User
 
 
 def init_user_model():
     print(f"Initializing model user: begin")
 
-    UserManager.init_database()
+    User.init_database()
 
     print(f"Initializing model user: end")
 
@@ -15,7 +15,7 @@ def init_user_model():
 def init_article_model():
     print(f"Initializing model article: begin")
 
-    ArticleManager.init_database()
+    ArticleModel.init_database()
 
     print(f"Initializing model article: end")
 
@@ -23,7 +23,7 @@ def init_article_model():
 def init_comment_model():
     print(f"Initializing model comment: begin")
 
-    CommentManager.init_database()
+    CommentModel.init_database()
 
     print(f"Initializing model comment: end")
 
@@ -31,7 +31,7 @@ def init_comment_model():
 def init_interaction_model():
     print(f"Initializing model interaction: begin")
 
-    UserArticleInteractionManager.init_database()
+    UserArticleInteraction.init_database()
 
     print(f"Initializing model interaction: end")
 

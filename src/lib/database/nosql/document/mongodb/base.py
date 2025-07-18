@@ -8,6 +8,7 @@ from pydantic import BaseModel
 from pymongo.errors import DuplicateKeyError
 
 from src.lib.database.nosql.document.mongodb.mongodb_manager import MongoDBManager, mongodb_client
+from src.lib.database.nosql.document.mongodb.mongodb_monitoring_middleware import MONGO_QUERY_TIME
 from src.lib.database.nosql.keyvalue.redis.redis_manager import RedisManagerInstance
 from src.lib.log.api_logger import ApiLogger
 from src.lib.utility.utils import my_json_decoder, MyJSONEncoder
@@ -135,7 +136,8 @@ class MongoDBBaseModel(BaseModel):
 
         api_logger = ApiLogger(f"[MONGODB] [{cls._name().upper()}] [GET] : {data_id}")
 
-        result = cls.collection().find_one({"_id": ObjectId(data_id)})
+        with MONGO_QUERY_TIME.time():
+            result = cls.collection().find_one({"_id": ObjectId(data_id)})
 
         if result is None:
             api_logger.print_error(f"{cls._name()} not found")
@@ -154,13 +156,15 @@ class MongoDBBaseModel(BaseModel):
 
         try:
             if self._data_id() is None:
-                result = self.collection().insert_one(self.to_bson())
+                with MONGO_QUERY_TIME.time():
+                    result = self.collection().insert_one(self.to_bson())
             else:
                 self.updated_at = datetime.now(timezone.utc)
-                result = self.collection().update_one(
-                    {"_id": ObjectId(self._data_id())},
-                    {"$set": self.to_update()}
-                )
+                with MONGO_QUERY_TIME.time():
+                    result = self.collection().update_one(
+                        {"_id": ObjectId(self._data_id())},
+                        {"$set": self.to_update()}
+                    )
                 self._scache(user_token, str(self._data_id()))
         except DuplicateKeyError:
             api_logger.print_error("Error during save")
@@ -170,7 +174,8 @@ class MongoDBBaseModel(BaseModel):
 
     def delete(self, user_token: UserToken):
         api_logger = ApiLogger(f"[MONGODB] [{self._name().upper()}] [DELETE] : {self._data_id()}")
-        result = self.collection().delete_one({"_id": ObjectId(self._data_id())})
+        with MONGO_QUERY_TIME.time():
+            result = self.collection().delete_one({"_id": ObjectId(self._data_id())})
         self._scache(user_token, str(self._data_id()))
         api_logger.print_log(f"{self._name()} deleted: {result.deleted_count > 0}")
         return result.deleted_count > 0
@@ -249,7 +254,8 @@ class MongoDBBaseModel(BaseModel):
 
             api_logger = ApiLogger(f"[MONGODB] [{cls._name().upper()} COUNT] [GET] : pipline : {pipeline}")
 
-            result = cls.collection().aggregate(pipeline)
+            with MONGO_QUERY_TIME.time():
+                result = cls.collection().aggregate(pipeline)
 
             if result:
                 stats = list(result)
@@ -261,10 +267,12 @@ class MongoDBBaseModel(BaseModel):
         else:
             if len(extra_match) > 0:
                 api_logger = ApiLogger(f"[MONGODB] [{cls._name().upper()} COUNT] [GET] : filter : {extra_match}")
-                total = cls.collection().count_documents(filter=extra_match)
+                with MONGO_QUERY_TIME.time():
+                    total = cls.collection().count_documents(filter=extra_match)
             else:
                 api_logger = ApiLogger(f"[MONGODB] [{cls._name().upper()} COUNT] [GET] : estimated document count")
-                total = cls.collection().estimated_document_count({})
+                with MONGO_QUERY_TIME.time():
+                    total = cls.collection().estimated_document_count({})
 
         api_logger.print_log()
 
@@ -282,7 +290,8 @@ class MongoDBBaseModel(BaseModel):
 
         api_logger = ApiLogger(f"[MONGODB] [{cls._name().upper()}] [GET] [LIST] : query={query_params}")
 
-        results = cls.collection().find(**query_params)
+        with MONGO_QUERY_TIME.time():
+            results = cls.collection().find(**query_params)
 
         api_logger.print_log()
 
@@ -298,7 +307,8 @@ class MongoDBBaseModel(BaseModel):
 
         api_logger = ApiLogger(f"[MONGODB] [{cls._name().upper()}] [GET BY] [LIST] : query={query_params}")
 
-        results = cls.collection().find(**query_params)
+        with MONGO_QUERY_TIME.time():
+            results = cls.collection().find(**query_params)
 
         api_logger.print_log()
 

@@ -8,6 +8,7 @@ from pydantic import Field, field_serializer
 
 from src.lib.authentication.password import hash_password
 from src.lib.database.nosql.document.mongodb.base import MongoDBBaseModel
+from src.lib.database.nosql.document.mongodb.mongodb_monitoring_middleware import MONGO_QUERY_TIME
 from src.lib.database.nosql.document.mongodb.objectid import PydanticObjectId
 from src.lib.database.nosql.keyvalue.redis.redis_manager import RedisManagerInstance
 from src.lib.log.api_logger import ApiLogger
@@ -183,7 +184,8 @@ class User(UserMe):
     def get_directly(cls, user_id: str):
 
         api_logger = ApiLogger(f"[MONGODB] [USER] [GET] : {user_id}")
-        result = cls.collection().find_one({"_id": ObjectId(user_id)})
+        with MONGO_QUERY_TIME.time():
+            result = cls.collection().find_one({"_id": ObjectId(user_id)})
         if result is None:
             api_logger.print_error("User does not exist")
             return None
@@ -204,21 +206,22 @@ class User(UserMe):
 
     def update_user(self, user_token: UserToken):
         api_logger = ApiLogger(f"[MONGODB] [USER] [UPDATE] : {self.to_json()}")
-        result = self.collection().update_one(
-            filter={"_id": ObjectId(self.user_id)},
-            update={
-                "$set": {
-                    "firstname": self.firstname,
-                    "lastname": self.lastname,
-                    "phone": self.phone if self.phone else "",
-                    "cell": self.cell if self.cell else "",
-                    "address": self.address.to_json() if self.address else None,
-                    "preferences": self.preferences,
-                    "preferences_enable": self.preferences_enable,
-                    "updated_at": datetime.now(timezone.utc)
+        with MONGO_QUERY_TIME.time():
+            result = self.collection().update_one(
+                filter={"_id": ObjectId(self.user_id)},
+                update={
+                    "$set": {
+                        "firstname": self.firstname,
+                        "lastname": self.lastname,
+                        "phone": self.phone if self.phone else "",
+                        "cell": self.cell if self.cell else "",
+                        "address": self.address.to_json() if self.address else None,
+                        "preferences": self.preferences,
+                        "preferences_enable": self.preferences_enable,
+                        "updated_at": datetime.now(timezone.utc)
+                    }
                 }
-            }
-        )
+            )
         # print(result)
         self._scache(user_token, str(self.user_id))
         api_logger.print_log(f"user updated: {result.modified_count > 0}")
@@ -233,15 +236,16 @@ class User(UserMe):
         if not account.role:
             account.role = "user"
 
-        result = cls.collection().update_one(
-            filter={"_id": ObjectId(user_id)},
-            update={
-                "$set": {
-                    "account": account,
-                    "updated_at": datetime.now(timezone.utc)
+        with MONGO_QUERY_TIME.time():
+            result = cls.collection().update_one(
+                filter={"_id": ObjectId(user_id)},
+                update={
+                    "$set": {
+                        "account": account,
+                        "updated_at": datetime.now(timezone.utc)
+                    }
                 }
-            }
-        )
+            )
         cls._scache(user_token, user_id)
         api_logger.print_log(f"user updated: {result.modified_count > 0}")
         return result.modified_count > 0
@@ -263,21 +267,22 @@ class User(UserMe):
         current_datetime = datetime.now(timezone.utc)
 
         password_history = PasswordHistory(password=hashed_password, created_at=current_datetime)
-        result = cls.collection().update_one(
-            filter={"_id": ObjectId(user_id)},
-            update={
-                "$set": {
-                    "password": hashed_password,
-                    "updated_at": current_datetime
-                },
-                "$push": {
-                    "password_history": {
-                        "$each": [password_history.model_dump(by_alias=True, exclude_none=True)],
-                        "$slice": -5  # keep only the last 5
+        with MONGO_QUERY_TIME.time():
+            result = cls.collection().update_one(
+                filter={"_id": ObjectId(user_id)},
+                update={
+                    "$set": {
+                        "password": hashed_password,
+                        "updated_at": current_datetime
+                    },
+                    "$push": {
+                        "password_history": {
+                            "$each": [password_history.model_dump(by_alias=True, exclude_none=True)],
+                            "$slice": -5  # keep only the last 5
+                        }
                     }
                 }
-            }
-        )
+            )
 
         api_logger.print_log(f"password updated: {result.modified_count > 0}")
         return result.modified_count > 0
@@ -285,7 +290,8 @@ class User(UserMe):
     @classmethod
     def get_by_email(cls, email: str):
         api_logger = ApiLogger(f"[MONGODB] [USER] [GET] [BY EMAIL] : {email}")
-        user = cls.collection().find_one({"email": email})
+        with MONGO_QUERY_TIME.time():
+            user = cls.collection().find_one({"email": email})
         if user is None:
             api_logger.print_error("User does not exist")
             return None
@@ -360,7 +366,8 @@ class UserPreferencesDashboard(DataBaseModel):
             }
         ]
 
-        stats = cls.collection().aggregate(pipeline)
+        with MONGO_QUERY_TIME.time():
+            stats = cls.collection().aggregate(pipeline)
         if stats is None:
             api_logger.print_error("Error during retrieving statistics")
 

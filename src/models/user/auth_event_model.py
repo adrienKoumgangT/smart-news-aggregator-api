@@ -5,6 +5,7 @@ from flask import Request
 from pydantic import Field, field_serializer
 
 from src.lib.database.nosql.document.mongodb.base import MongoDBBaseModel
+from src.lib.database.nosql.document.mongodb.mongodb_monitoring_middleware import MONGO_QUERY_TIME
 from src.lib.database.nosql.document.mongodb.objectid import PydanticObjectId
 from src.lib.log.api_logger import ApiLogger
 from src.lib.utility.utils_server import RequestData
@@ -38,7 +39,8 @@ class AuthEventLogModel(MongoDBBaseModel):
     def save(self, user_token: UserToken = None):
         api_logger = ApiLogger(f"[MONGODB] [AUTH EVENT LOG] [SAVE]: {self.to_json()}")
 
-        result = self.collection().insert_one(self.to_bson())
+        with MONGO_QUERY_TIME.time():
+            result = self.collection().insert_one(self.to_bson())
 
         self.auth_event_log_id = result.inserted_id
         api_logger.print_log(f"Auth Event Log ID: {self.auth_event_log_id}")

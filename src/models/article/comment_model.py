@@ -6,8 +6,11 @@ from flask_restx import Namespace, fields
 from pydantic import Field, field_serializer
 
 from src.lib.database.nosql.document.mongodb.base import MongoDBBaseModel
+from src.lib.database.nosql.document.mongodb.mongodb_monitoring_middleware import MONGO_QUERY_TIME
 from src.lib.database.nosql.document.mongodb.objectid import PydanticObjectId
 from src.lib.log.api_logger import ApiLogger
+from src.models import DataBaseModel
+from src.models.article.article_source_model import ArticleSourceModel
 from src.models.user.auth_model import UserToken
 from src.models.user.user_model import UserAuthor
 
@@ -69,14 +72,15 @@ class CommentModel(MongoDBBaseModel):
 
     def update_author(self, author: Optional[UserAuthor]):
         api_logger = ApiLogger(f"[MONGODB] [COMMENT] [UPDATE] [AUTHOR] : {self.user_id} ({author.to_json()})")
-        result = self.collection().update_one(
-            filter={'_id': ObjectId(self.comment_id)},
-            update={
-                '$set': {
-                    'author': author.to_json()
+        with MONGO_QUERY_TIME.time():
+            result = self.collection().update_one(
+                filter={'_id': ObjectId(self.comment_id)},
+                update={
+                    '$set': {
+                        'author': author.to_json()
+                    }
                 }
-            }
-        )
+            )
         if result.modified_count > 0:
             self.author = author
         api_logger.print_log(f"comment updated: {result.modified_count > 0}")
@@ -116,9 +120,10 @@ class CommentModel(MongoDBBaseModel):
     def last_comments(cls, article_id: str, page: int = 1, limit: int = 3):
         api_logger = ApiLogger(f"[MONGODB] [COMMENT] [GET] : article={article_id}, page={page} and limit={limit}")
 
-        results = cls.collection().find(
-            {'article_id': article_id},
-        ).sort('insert_at', -1).skip(limit * (page-1)).limit(limit)
+        with MONGO_QUERY_TIME.time():
+            results = cls.collection().find(
+                {'article_id': article_id},
+            ).sort('insert_at', -1).skip(limit * (page-1)).limit(limit)
 
         api_logger.print_log()
 
@@ -127,5 +132,138 @@ class CommentModel(MongoDBBaseModel):
             return [cls(**result) for result in results]
         return []
 
+
+class ArticleInfoModel(DataBaseModel):
+    extern_api: Optional[str]
+    title: str
+    description: Optional[str] = None
+    author: Optional[ArticleSourceModel] = None
+    source: Optional[ArticleSourceModel] = None
+    published_at: str | datetime
+
+    @staticmethod
+    def to_model(name_space: Namespace):
+        return name_space.model('ArticleInfoModel', {
+            'extern_api': fields.String(required=True),
+            'title': fields.String(required=True),
+            'description': fields.String(required=True),
+            'author': fields.Nested(ArticleSourceModel.to_model(name_space)),
+            'source': fields.Nested(ArticleSourceModel.to_model(name_space)),
+            'published_at': fields.String(required=True),
+        })
+
+
+class CommentDetailsModel(CommentModel):
+    article_info: Optional[ArticleInfoModel] = None
+
+    @staticmethod
+    def to_model(name_space: Namespace):
+        return name_space.model('CommentDetailsModel', {
+            'comment_id': fields.String(required=False),
+            'user_id': fields.String(required=False),
+            'author': fields.Nested(UserAuthor.to_model(name_space=name_space), required=False),
+            'article_id': fields.String(required=False),
+            'comment_fk': fields.String(required=False),
+            'content': fields.String(required=True),
+            'article_info': fields.Nested(ArticleInfoModel.to_model(name_space=name_space), required=False),
+        })
+
+    @staticmethod
+    def to_model_list(name_space: Namespace):
+        return name_space.model('CommentDetailsModelList', {
+            'comments': fields.List(fields.Nested(CommentDetailsModel.to_model(name_space)), ),
+            'total': fields.Integer,
+            'page': fields.Integer,
+            'limit': fields.Integer,
+            'pageCount': fields.Integer,
+        })
+
+    @classmethod
+    def get_comments_count(cls, user_token: UserToken, user_id: str = None):
+        filter = {'user_id': user_id} if user_id else {'user_id': str(user_token.user_id)}
+
+        api_logger = ApiLogger(f"[MONGODB] [COMMENT] [GET] : filter={filter}")
+
+        with MONGO_QUERY_TIME.time():
+            total = cls.collection().count_documents(filter=filter)
+
+        api_logger.print_log()
+
+        return total
+
+    @classmethod
+    def get_user_comments_with_article(cls, user_token: UserToken, user_id: str = None, page: int = 1, limit: int = 10):
+        extra_filter = {}
+
+        if user_id is None:
+            user_id = str(user_token.user_id)
+
+        pipeline = [
+            {
+                "$match": {
+                    "user_id": user_id
+                }
+            },
+            {
+                "$sort": {
+                    "created_at": -1
+                }
+            },
+            {
+                "$skip": (page - 1) * limit
+            },
+            {
+                "$limit": limit
+            },
+            {
+                "$addFields": {
+                    "article_id_obj": {
+                        "$toObjectId": "$article_id"  # Convert string to ObjectId
+                    }
+                }
+            },
+            {
+                "$lookup": {
+                    "from": "articles",
+                    "localField": "article_id_obj",
+                    "foreignField": "_id",
+                    "as": "article"
+                }
+            },
+            {
+                "$unwind": "$article"
+            },
+            {
+                "$project": {
+                    "_id": 1,
+                    "user_id": 1,
+                    "author": 1,
+                    "article_id": 1,
+                    "comment_fk": 1,
+                    "content": 1,
+                    "created_at": 1,
+                    "updated_at": 1,
+                    "article_info": {
+                        "extern_api": "$article.extern_api",
+                        "title": "$article.title",
+                        "description": "$article.description",
+                        "author": "$article.author",
+                        "source": "$article.source",
+                        "published_at": "$article.published_at"
+                    }
+                }
+            }
+        ]
+
+        api_logger = ApiLogger(f"[MONGODB] [COMMENT] [GET BY USER] : user_id={user_id}, page={page} and limit={limit}")
+
+        with MONGO_QUERY_TIME.time():
+            results = cls.collection().aggregate(pipeline)
+
+        api_logger.print_log()
+
+        if results:
+            return [cls(**result) for result in results]
+        return []
 
 

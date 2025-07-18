@@ -75,7 +75,7 @@ class AdminArticle(Resource):
         if not article:
             raise NotFoundException("Article not found")
 
-        article.delete()
+        article.delete(user_token)
 
         return {"success": True, "message": "Article deleted"}
 
@@ -160,7 +160,7 @@ class AdminUser(Resource):
         if not user:
             raise NotFoundException("User not found")
 
-        user.delete()
+        user.delete(user_token)
 
         return {"success": True, "message": "User deleted"}
 
@@ -323,6 +323,8 @@ class AdminDashboardError(Resource):
 
         if not err:
             raise NotFoundException("Error not found")
+
+        err.delete(user_token)
 
         return {"success": True, "message": "Error deleted"}
 
