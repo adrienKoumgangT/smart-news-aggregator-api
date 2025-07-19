@@ -71,7 +71,7 @@ def create_app():
         RequestUtility.print_info_request(request)
         if request.path.startswith("/docs") or request.path.startswith("/swagger"):
             # print(f"swagger is allowed: {config.swagger_allowed}")
-            if config.swagger_allowed:
+            if not config.swagger_allowed:
                 allowed_networks = [ipaddress.ip_network(network) for network in ALLOWED_NETWORKS]
                 # print(f"allowed networks: {ALLOWED_NETWORKS}")
                 # print(f"is prod: {config.prod}")

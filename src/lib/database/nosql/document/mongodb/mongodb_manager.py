@@ -4,6 +4,7 @@ from pymongo import MongoClient
 
 from src.lib.configuration import configuration
 from src.lib.configuration.configuration import config
+from src.lib.log.api_logger import ApiLogger
 
 
 class MongoDBManager:
@@ -17,6 +18,9 @@ class MongoDBManager:
         return configuration.get_env_var(f"mongodb.collection.{name}")
 
 
-mongodb_client = MongoClient(
-    config.mongo.uri if config.mongo.uri else "mongodb://localhost:27017/"
-)
+mongo_uri = config.mongo.uri if config.mongo.uri else "mongodb://localhost:27017/"
+api_logger = ApiLogger(f"[MONGODB] [CONNECTION] : uri={mongo_uri}")
+mongodb_client = MongoClient(mongo_uri)
+mongodb_client.server_info()
+api_logger.print_log()
+

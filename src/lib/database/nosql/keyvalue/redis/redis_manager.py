@@ -6,12 +6,16 @@ import redis
 
 from src.lib.configuration.configuration import config
 from src.lib.database.nosql.keyvalue.redis.redis_monitoring_middleware import monitor_redis_operations
+from src.lib.log.api_logger import ApiLogger
 
 
 class RedisManager:
     def __init__(self, redis_url: str = "redis://localhost:6379"):
         self.redis_url = redis_url
+        api_logger = ApiLogger(f"[REDIS] [CONNECTION] : uri={redis_url}")
         self.client = redis.Redis.from_url(self.redis_url)
+        self.client.ping()
+        api_logger.print_log()
 
     @monitor_redis_operations()
     def set(self, key: str, value: str, ex: Optional[int | timedelta] = None):
@@ -89,3 +93,5 @@ class RedisManagerInstance:
             RedisManagerInstance.init_database()
         return RedisManagerInstance.instance
 
+
+RedisManagerInstance.get_instance()
