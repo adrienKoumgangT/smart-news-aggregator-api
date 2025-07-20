@@ -43,23 +43,24 @@ class CommentModel(MongoDBBaseModel):
     @classmethod
     def init(cls):
         try:
-            cls.collection().createIndex({"article_id": 1})
+            cls.collection().create_index({"article_id": 1})
         except Exception as e:
             print(e)
         try:
-            cls.collection().createIndex({"user_id": 1})
+            cls.collection().create_index({"user_id": 1})
         except Exception as e:
             print(e)
         try:
-            cls.collection().createIndex([("article_id", 1), ("created_at", -1)])
+            cls.collection().create_index([("article_id", 1), ("created_at", -1)])
         except Exception as e:
             print(e)
         try:
-            cls.collection().createIndex([("user_id", 1), ("created_at", -1)])
+            cls.collection().create_index([("user_id", 1), ("created_at", -1)])
         except Exception as e:
             print(e)
         try:
-            cls.collection().createIndex([("comment_fk", 1), ("created_at", -1)])
+            print([("comment_fk", 1), ("created_at", -1)])
+            # cls.collection().create_index([("comment_fk", 1), ("created_at", -1)])
         except Exception as e:
             print(e)
         try:
@@ -145,7 +146,7 @@ class CommentModel(MongoDBBaseModel):
         with MONGO_QUERY_TIME.time():
             results = cls.collection().find(
                 {'article_id': article_id},
-            ).sort('insert_at', -1).skip(limit * (page-1)).limit(limit)
+            ).sort('created_at', -1).skip(limit * (page-1)).limit(limit)
 
         api_logger.print_log()
 

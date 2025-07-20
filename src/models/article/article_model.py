@@ -59,11 +59,11 @@ class ArticleSummaryModel(MongoDBBaseModel):
         except Exception as e:
             print(e)
         try:
-            cls.collection().createIndex({"tags": 1})
+            cls.collection().create_index({"tags": 1})
         except Exception as e:
             print(e)
         try:
-            cls.collection().createIndex({"published_at": -1})
+            cls.collection().create_index({"published_at": -1})
         except Exception as e:
             print(e)
         try:
@@ -71,11 +71,11 @@ class ArticleSummaryModel(MongoDBBaseModel):
         except Exception as e:
             print(e)
         try:
-            cls.collection().createIndex({"title": 1})
+            cls.collection().create_index({"title": 1})
         except Exception as e:
             print(e)
         try:
-            cls.collection().createIndex({"description": 1})
+            cls.collection().create_index({"description": 1})
         except Exception as e:
             print(e)
         try:

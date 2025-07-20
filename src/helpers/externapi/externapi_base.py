@@ -54,11 +54,11 @@ class LogRequest(MongoDBBaseModel):
     @classmethod
     def init(cls):
         try:
-            cls.collection().createIndex({"response.status_code": -1})
+            cls.collection().create_index({"response.status_code": -1})
         except Exception as e:
             print(e)
         try:
-            cls.collection().createIndex([("created_at", -1), ("source", 1)])
+            cls.collection().create_index([("created_at", -1), ("source", 1)])
         except Exception as e:
             print(e)
 

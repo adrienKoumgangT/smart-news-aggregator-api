@@ -66,15 +66,15 @@ class UserArticleInteractionModel(MongoDBBaseModel):
     @classmethod
     def init(cls):
         try:
-            cls.collection().createIndex({"article_id": 1})
+            cls.collection().create_index({"article_id": 1})
         except Exception as e:
             print(e)
         try:
-            cls.collection().createIndex([("article_id", 1), ("updated_at", -1)])
+            cls.collection().create_index([("article_id", 1), ("updated_at", -1)])
         except Exception as e:
             print(e)
         try:
-            cls.collection().createIndex([("user_id", 1), ("read_at", -1)])
+            cls.collection().create_index([("user_id", 1), ("read_at", -1)])
         except Exception as e:
             print(e)
 

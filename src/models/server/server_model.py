@@ -40,7 +40,7 @@ class ServerErrorLogModel(MongoDBBaseModel):
     @classmethod
     def init(cls):
         try:
-            cls.collection().createIndex({"created_at": -1})
+            cls.collection().create_index({"created_at": -1})
         except Exception as e:
             print(e)
 
