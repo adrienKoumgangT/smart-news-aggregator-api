@@ -51,6 +51,17 @@ class LogRequest(MongoDBBaseModel):
     def _data_id(self) -> ObjectId:
         return self.log_request_id
 
+    @classmethod
+    def init(cls):
+        try:
+            cls.collection().createIndex({"response.status_code": -1})
+        except Exception as e:
+            print(e)
+        try:
+            cls.collection().createIndex([("created_at", -1), ("source", 1)])
+        except Exception as e:
+            print(e)
+
     def save(self, user_token: UserToken):
         api_logger = ApiLogger(f"[MONGODB] [LOG REQUEST] [SAVE] save log request {self.source} : {self.url}")
 

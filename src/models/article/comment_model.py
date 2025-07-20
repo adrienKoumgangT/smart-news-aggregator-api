@@ -42,8 +42,30 @@ class CommentModel(MongoDBBaseModel):
 
     @classmethod
     def init(cls):
-        cls.collection().createIndex({"article_id": 1})
-        cls.collection().createIndex({"article_id": 1, "created_at": 1})
+        try:
+            cls.collection().createIndex({"article_id": 1})
+        except Exception as e:
+            print(e)
+        try:
+            cls.collection().createIndex({"user_id": 1})
+        except Exception as e:
+            print(e)
+        try:
+            cls.collection().createIndex([("article_id", 1), ("created_at", -1)])
+        except Exception as e:
+            print(e)
+        try:
+            cls.collection().createIndex([("user_id", 1), ("created_at", -1)])
+        except Exception as e:
+            print(e)
+        try:
+            cls.collection().createIndex([("comment_fk", 1), ("created_at", -1)])
+        except Exception as e:
+            print(e)
+        try:
+            pass
+        except Exception as e:
+            print(e)
 
     @staticmethod
     def to_model(name_space: Namespace):

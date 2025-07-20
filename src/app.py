@@ -14,9 +14,11 @@ from src.apps.user_endpoint import ns_user
 from src.lib.configuration.configuration import get_env_var, config
 from src.lib.exception.exception_handler import register_error_handlers
 from src.lib.utility.utils_server import RequestUtility
+from src.models.init_model import init_all_model
 
 ALLOWED_NETWORKS = config.swagger_allowed_hosts
 
+init_all_model()
 
 def create_app():
     app = Flask(__name__)

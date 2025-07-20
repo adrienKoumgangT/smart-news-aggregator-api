@@ -1,48 +1,58 @@
+from src.helpers.externapi.externapi_base import LogRequest
+from src.lib.log.api_logger import ApiLogger
 from src.models.article.article_model import ArticleModel
 from src.models.article.comment_model import CommentModel
-from src.models.article.user_article_interaction_models import UserArticleInteraction
+from src.models.article.user_article_interaction_models import UserArticleInteractionModel
 from src.models.user.user_model import User
 
 
 def init_user_model():
-    print(f"Initializing model user: begin")
+    api_logger = ApiLogger(f"[MONGODB] [USER] [INDEX CREATION] ")
 
-    User.init_database()
+    User.init()
 
-    print(f"Initializing model user: end")
+    api_logger.print_log()
 
 
 def init_article_model():
-    print(f"Initializing model article: begin")
+    api_logger = ApiLogger(f"[MONGODB] [ARTICLE] [INDEX CREATION] ")
 
-    ArticleModel.init_database()
+    ArticleModel.init()
 
-    print(f"Initializing model article: end")
+    api_logger.print_log()
 
 
 def init_comment_model():
-    print(f"Initializing model comment: begin")
+    api_logger = ApiLogger(f"[MONGODB] [COMMENT] [INDEX CREATION] ")
 
-    CommentModel.init_database()
+    CommentModel.init()
 
-    print(f"Initializing model comment: end")
+    api_logger.print_log()
 
 
 def init_interaction_model():
-    print(f"Initializing model interaction: begin")
+    api_logger = ApiLogger(f"[MONGODB] [INTERACTION] [INDEX CREATION] ")
 
-    UserArticleInteraction.init_database()
+    UserArticleInteractionModel.init()
 
-    print(f"Initializing model interaction: end")
+    api_logger.print_log()
 
 
-def init_model():
+def init_article_log_request_model():
+    api_logger = ApiLogger(f"[MONGODB] [ARTICLE LOG REQUEST] [INDEX CREATION] ")
+
+    LogRequest.init()
+
+    api_logger.print_log()
+
+
+def init_all_model():
     init_user_model()
     init_article_model()
     init_comment_model()
     init_interaction_model()
-
+    init_article_log_request_model()
 
 if __name__ == '__main__':
-    init_model()
+    init_all_model()
 

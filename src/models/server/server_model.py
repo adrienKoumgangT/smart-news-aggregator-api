@@ -37,6 +37,13 @@ class ServerErrorLogModel(MongoDBBaseModel):
     def _data_id(self) -> ObjectId:
         return self.server_error_log_id
 
+    @classmethod
+    def init(cls):
+        try:
+            cls.collection().createIndex({"created_at": -1})
+        except Exception as e:
+            print(e)
+
     @staticmethod
     def to_model(name_space: Namespace):
         return name_space.model('ServerErrorLogModel', {

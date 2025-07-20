@@ -90,7 +90,14 @@ class UserAuthor(MongoDBBaseModel):
 
     @classmethod
     def init(cls):
-        cls.collection().create_index([("email", 1)], unique=True)
+        try:
+            cls.collection().create_index([("email", 1)], unique=True)
+        except Exception as e:
+            print(e)
+        try:
+            cls.collection().create_index({"preferences": 1})
+        except Exception as e:
+            print(e)
 
     @staticmethod
     def to_model(name_space: Namespace):

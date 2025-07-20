@@ -53,31 +53,55 @@ class ArticleSummaryModel(MongoDBBaseModel):
 
     @classmethod
     def init(cls):
-        cls.collection().createIndex({"tags": 1})
-        cls.collection().createIndex({"published_at": -1})
-        cls.collection().create_index([("tags", 1), ("published_at", -1)])
-        """
         try:
-            cls.collection().create_index(
-                {
-                    "title": "text",
-                    "description": "text"
-                },
-                {
-                    "name": "title_desc_search_index",
-                    "weights": {
-                        "title": 3, # Higher relevance for title matches
-                        "description": 2
-                    },
-                    "default_language": "none"
-                }
-            )
+            # cls.collection().create_index([("extern_api", 1), ("extern_id", 1), ("title", 1)], unique=True)
+            pass
         except Exception as e:
             print(e)
-        """
-        cls.collection().createIndex({"title": 1})
-        cls.collection().createIndex({"description": 1})
-        cls.collection().create_index([("title", 1), ("description", 1)])
+        try:
+            cls.collection().createIndex({"tags": 1})
+        except Exception as e:
+            print(e)
+        try:
+            cls.collection().createIndex({"published_at": -1})
+        except Exception as e:
+            print(e)
+        try:
+            cls.collection().create_index([("tags", 1), ("published_at", -1)])
+        except Exception as e:
+            print(e)
+        try:
+            cls.collection().createIndex({"title": 1})
+        except Exception as e:
+            print(e)
+        try:
+            cls.collection().createIndex({"description": 1})
+        except Exception as e:
+            print(e)
+        try:
+            """
+                    try:
+                        cls.collection().create_index(
+                            {
+                                "title": "text",
+                                "description": "text"
+                            },
+                            {
+                                "name": "title_desc_search_index",
+                                "weights": {
+                                    "title": 3, # Higher relevance for title matches
+                                    "description": 2
+                                },
+                                "default_language": "none"
+                            }
+                        )
+                    except Exception as e:
+                        print(e)
+                    """
+
+            cls.collection().create_index([("title", 1), ("description", 1)])
+        except Exception as e:
+            print(e)
 
     @staticmethod
     def to_model(name_space: Namespace):
